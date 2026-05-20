@@ -1,0 +1,48 @@
+name: CI (main)
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v2
+      - name: setup rust toolchain
+        run: rustup update && rustup toolchain install
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: mdbook
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: mdbook-toc
+      - name: patch for gh-pages build
+        run: mv mini-lsm-book/theme/head.hbs._ mini-lsm-book/theme/head.hbs
+      - name: check and build
+        run: cargo x ci
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: mini-lsm-book/book
+
+  deploy:
+    needs: build
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-22.04
+    if: github.repository == 'skyzh/mini-lsm'
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

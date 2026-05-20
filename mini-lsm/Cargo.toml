@@ -1,0 +1,44 @@
+[package]
+name = "mini-lsm"
+version = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+description = "A course for building an LSM tree storage engine in a week."
+
+
+[dependencies]
+anyhow = "1"
+arc-swap = "1"
+bytes = "1"
+crossbeam-epoch = "0.9"
+crossbeam-skiplist = "0.1"
+parking_lot = "0.12"
+ouroboros = "0.18"
+moka = { version = "0.12", features = ["sync"] }
+clap = { version = "4", features = ["derive"] }
+rand = "0.10"
+crossbeam-channel = "0.5"
+serde_json = { version = "1" }
+serde = { version = "1", features = ["derive"] }
+farmhash = "1"
+crc32fast = "1"
+nom = "8"
+rustyline = "17"
+
+[dev-dependencies]
+tempfile = "3"
+
+[[bin]]
+name = "mini-lsm-cli-ref"
+path = "src/bin/mini-lsm-cli.rs"
+
+[[bin]]
+name = "mini-lsm-wrapper-ref"
+path = "src/bin/wrapper.rs"
+
+[[bin]]
+name = "compaction-simulator-ref"
+path = "src/bin/compaction-simulator.rs"
