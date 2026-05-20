@@ -16,7 +16,7 @@
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
 use std::collections::HashMap;
-use std::ops::{Bound, Deref};
+use std::ops::{Bound, Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
@@ -313,12 +313,9 @@ impl LsmStorageInner {
 
         let _ = state_clone.memtable.put(_key, _value);
 
-        // println!("put curr size {}", state_clone.memtable.approximate_size());
-
         if state_clone.memtable.approximate_size() >= self.options.target_sst_size {
             let state_lock = self.state_lock.lock();
             if self.state.read().memtable.approximate_size() >= self.options.target_sst_size {
-                println!("called");
                 let _ = self.force_freeze_memtable(&state_lock);
             }
         }
@@ -331,6 +328,13 @@ impl LsmStorageInner {
         let state_clone = self.state.read().clone();
 
         let _ = state_clone.memtable.put(_key, b"");
+
+        if state_clone.memtable.approximate_size() >= self.options.target_sst_size {
+            let state_lock = self.state_lock.lock();
+            if self.state.read().memtable.approximate_size() >= self.options.target_sst_size {
+                let _ = self.force_freeze_memtable(&state_lock);
+            }
+        }
 
         Ok(())
     }
@@ -361,8 +365,8 @@ impl LsmStorageInner {
         let full_memtable = new_state.memtable.clone();
         new_state.imm_memtables.insert(0, full_memtable);
         new_state.memtable = Arc::new(MemTable::create(self.next_sst_id()));
-        let write_lock = self.state.write();
-        let _ = std::mem::replace(&mut write_lock.clone(), Arc::new(new_state));
+        let mut write_lock = self.state.write();
+        let _ = std::mem::replace(write_lock.deref_mut(), Arc::new(new_state));
         Ok(())
     }
 

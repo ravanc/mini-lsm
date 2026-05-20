@@ -103,14 +103,10 @@ impl MemTable {
     pub fn put(&self, _key: &[u8], _value: &[u8]) -> Result<()> {
         self.map
             .insert(Bytes::copy_from_slice(_key), Bytes::copy_from_slice(_value));
-        if _value.len() == 0 {
-            let reduction = self.get(_key).map(|v| v.len()).unwrap_or(0);
-            self.approximate_size
-                .fetch_sub(reduction, std::sync::atomic::Ordering::SeqCst);
-        } else {
-            self.approximate_size
-                .fetch_add(_value.len(), std::sync::atomic::Ordering::SeqCst);
-        }
+        self.approximate_size.fetch_add(
+            _key.len() + _value.len(),
+            std::sync::atomic::Ordering::SeqCst,
+        );
         Ok(())
     }
 
