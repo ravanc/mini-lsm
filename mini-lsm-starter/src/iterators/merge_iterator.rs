@@ -59,7 +59,18 @@ pub struct MergeIterator<I: StorageIterator> {
 
 impl<I: StorageIterator> MergeIterator<I> {
     pub fn create(iters: Vec<Box<I>>) -> Self {
-        unimplemented!()
+        let mut i = MergeIterator {
+            iters: iters
+                .into_iter()
+                .enumerate()
+                .filter(|iter| iter.1.is_valid())
+                .map(|(idx, iter)| HeapWrapper(idx, iter))
+                .collect(),
+            current: None,
+        };
+        println!("length of iters: {}", i.iters.len());
+        i.current = i.iters.pop();
+        i
     }
 }
 
@@ -69,18 +80,54 @@ impl<I: 'static + for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>>> StorageIt
     type KeyType<'a> = KeySlice<'a>;
 
     fn key(&self) -> KeySlice<'_> {
-        unimplemented!()
+        self.current.as_ref().unwrap().1.key()
     }
 
     fn value(&self) -> &[u8] {
-        unimplemented!()
+        self.current.as_ref().unwrap().1.value()
     }
 
     fn is_valid(&self) -> bool {
-        unimplemented!()
+        self.current.is_some() && self.current.as_ref().unwrap().1.is_valid()
     }
 
     fn next(&mut self) -> Result<()> {
-        unimplemented!()
+        let old_current = self.current.as_mut().unwrap();
+
+        loop {
+            let heap_wrapper = self.iters.peek_mut();
+            if heap_wrapper.is_none() {
+                break;
+            }
+
+            let mut heap_wrapper = heap_wrapper.unwrap();
+            if heap_wrapper.1.key() != old_current.1.key() {
+                break;
+            }
+
+            let res = heap_wrapper.1.next();
+
+            match res {
+                Ok(()) => {
+                    if !heap_wrapper.1.is_valid() {
+                        std::collections::binary_heap::PeekMut::pop(heap_wrapper);
+                        continue;
+                    }
+                }
+                Err(e) => {
+                    std::collections::binary_heap::PeekMut::pop(heap_wrapper);
+                    return Err(e);
+                }
+            }
+        }
+
+        old_current.1.next()?;
+
+        if old_current.1.is_valid() {
+            self.iters.push(self.current.take().unwrap());
+        }
+        self.current = self.iters.pop();
+
+        Ok(())
     }
 }
