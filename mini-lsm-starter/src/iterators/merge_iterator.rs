@@ -83,15 +83,12 @@ impl<I: 'static + for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>>> StorageIt
     }
 
     fn value(&self) -> &[u8] {
-        println!("mergeiterator length: {}", self.iters.len());
         self.current.as_ref().unwrap().1.value()
     }
 
     fn is_valid(&self) -> bool {
         // self.current.is_some() && self.current.as_ref().unwrap().1.is_valid()
         let valid = self.current.is_some() && self.current.as_ref().unwrap().1.is_valid();
-        println!("self.current is_some: {}", self.current.is_some());
-        println!("validity of the thing: {valid}");
         valid
     }
 

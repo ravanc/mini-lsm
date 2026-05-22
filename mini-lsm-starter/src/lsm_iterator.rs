@@ -47,7 +47,6 @@ impl StorageIterator for LsmIterator {
     }
 
     fn value(&self) -> &[u8] {
-        println!("lsmiterator level call");
         self.inner.value()
     }
 
@@ -56,7 +55,6 @@ impl StorageIterator for LsmIterator {
         if self.inner.is_valid() {
             let mut value = self.inner.value();
             while value.is_empty() {
-                println!("next() called because deleted key");
                 self.inner.next()?;
                 value = self.inner.value();
             }
@@ -97,7 +95,6 @@ impl<I: StorageIterator> StorageIterator for FusedIterator<I> {
     }
 
     fn value(&self) -> &[u8] {
-        println!("fused level call");
         self.iter.value()
     }
 
@@ -115,7 +112,6 @@ impl<I: StorageIterator> StorageIterator for FusedIterator<I> {
             Ok(()) => Ok(()),
             Err(e) => {
                 self.has_errored = true;
-                println!("new has_errored value {}", self.has_errored);
                 Err(e)
             }
         }
