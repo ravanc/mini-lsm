@@ -21,7 +21,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 
 use anyhow::Result;
-use bytes::{Buf, Bytes};
+use bytes::Bytes;
 use crossbeam_skiplist::SkipMap;
 use ouroboros::self_referencing;
 
@@ -191,9 +191,9 @@ impl StorageIterator for MemTableIterator {
         let _next = self.with_iter_mut(|iter| iter.next());
         let mut key = Bytes::new();
         let mut value = Bytes::new();
-        if _next.is_some() {
-            key = _next.as_ref().unwrap().key().clone();
-            value = _next.as_ref().unwrap().value().clone();
+        if let Some(iter) = &_next {
+            key = iter.key().clone();
+            value = iter.value().clone();
         }
         drop(_next);
         self.with_item_mut(|item| {

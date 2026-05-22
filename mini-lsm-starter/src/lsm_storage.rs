@@ -16,7 +16,7 @@
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
 use std::collections::HashMap;
-use std::ops::{Bound, Deref, DerefMut};
+use std::ops::{Bound, DerefMut};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
@@ -30,6 +30,7 @@ use crate::compact::{
     CompactionController, CompactionOptions, LeveledCompactionController, LeveledCompactionOptions,
     SimpleLeveledCompactionController, SimpleLeveledCompactionOptions, TieredCompactionController,
 };
+use crate::iterators::merge_iterator::MergeIterator;
 use crate::lsm_iterator::{FusedIterator, LsmIterator};
 use crate::manifest::Manifest;
 use crate::mem_table::MemTable;
@@ -398,6 +399,15 @@ impl LsmStorageInner {
         _lower: Bound<&[u8]>,
         _upper: Bound<&[u8]>,
     ) -> Result<FusedIterator<LsmIterator>> {
-        unimplemented!()
+        let state = self.state.read().clone();
+
+        let mem_table_iters = std::iter::once(state.memtable.clone())
+            .chain(state.imm_memtables.iter().cloned())
+            .map(|memtable| Box::new(memtable.scan(_lower, _upper)))
+            .collect::<Vec<_>>();
+        let merge_iter = MergeIterator::create(mem_table_iters);
+        let lsm_iter = LsmIterator::new(merge_iter);
+        let fused_iter = FusedIterator::new(lsm_iter.unwrap());
+        Ok(fused_iter)
     }
 }
