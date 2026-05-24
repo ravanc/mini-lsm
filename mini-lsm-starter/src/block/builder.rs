@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
-#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
+use bytes::BufMut;
 
 use crate::key::{KeySlice, KeyVec};
 
@@ -34,23 +33,49 @@ pub struct BlockBuilder {
 impl BlockBuilder {
     /// Creates a new block builder.
     pub fn new(block_size: usize) -> Self {
-        unimplemented!()
+        BlockBuilder {
+            offsets: vec![],
+            data: vec![],
+            block_size,
+            first_key: KeyVec::new(),
+        }
     }
 
     /// Adds a key-value pair to the block. Returns false when the block is full.
     /// You may find the `bytes::BufMut` trait useful for manipulating binary data.
     #[must_use]
     pub fn add(&mut self, key: KeySlice, value: &[u8]) -> bool {
-        unimplemented!()
+        let offset = self.data.len();
+        let offset_len = (self.offsets.len() + 1) * 2;
+        let key_len = key.len();
+        let value_len = value.len();
+        let num_elements_size = 2;
+        let after_len = offset + offset_len + key_len + value_len + num_elements_size;
+        println!("after_len {after_len} block_limit {}", self.block_size);
+        if after_len > self.block_size && !self.first_key.is_empty() {
+            return false;
+        }
+        self.offsets.push(offset as u16);
+        self.data.put_u16(key_len as u16);
+        self.data.put(key.into_inner());
+        self.data.put_u16(value_len as u16);
+        self.data.put(value);
+        if self.first_key.is_empty() {
+            self.first_key.set_from_slice(key);
+        }
+        true
     }
 
     /// Check if there is no key-value pair in the block.
     pub fn is_empty(&self) -> bool {
-        unimplemented!()
+        self.data.len() == 0
     }
 
     /// Finalize the block.
     pub fn build(self) -> Block {
-        unimplemented!()
+        Block {
+            data: self.data,
+            offsets: self.offsets,
+        }
     }
 }
