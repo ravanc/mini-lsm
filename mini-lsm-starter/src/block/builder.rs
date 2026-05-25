@@ -51,7 +51,6 @@ impl BlockBuilder {
         let value_len = value.len();
         let num_elements_size = 2;
         let after_len = offset + offset_len + key_len + value_len + num_elements_size;
-        println!("after_len {after_len} block_limit {}", self.block_size);
         if after_len > self.block_size && !self.first_key.is_empty() {
             return false;
         }

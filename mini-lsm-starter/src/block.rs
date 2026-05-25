@@ -22,6 +22,8 @@ pub use builder::BlockBuilder;
 use bytes::{BufMut, Bytes, BytesMut};
 pub use iterator::BlockIterator;
 
+use crate::key::KeyVec;
+
 /// A block is the smallest unit of read and caching in LSM tree. It is a collection of sorted key-value pairs.
 pub struct Block {
     pub(crate) data: Vec<u8>,
@@ -29,6 +31,36 @@ pub struct Block {
 }
 
 impl Block {
+    fn get_key_len_at(&self, position: u16) -> u16 {
+        let offset = self.offsets[position as usize] as usize;
+        u16::from_be_bytes([self.data[offset], self.data[offset + 1]])
+    }
+
+    fn get_key_at(&self, position: u16) -> KeyVec {
+        let offset = self.offsets[position as usize] as usize;
+        let key_len = self.get_key_len_at(position) as usize;
+        KeyVec::from_vec(self.data[offset + 2..offset + key_len + 2].to_vec())
+    }
+
+    fn get_value_len_at(&self, position: u16) -> u16 {
+        let offset = self.offsets[position as usize] as usize;
+        let key_len = self.get_key_len_at(position) as usize;
+        u16::from_be_bytes([
+            self.data[offset + 2 + key_len],
+            self.data[offset + 3 + key_len],
+        ])
+    }
+
+    fn get_value_range_at(&self, position: u16) -> (usize, usize) {
+        let offset = self.offsets[position as usize] as usize;
+        let key_len = self.get_key_len_at(position) as usize;
+        let value_len = self.get_value_len_at(position) as usize;
+        (
+            offset + 2 + key_len + 2,
+            offset + 2 + key_len + 2 + value_len,
+        )
+    }
+
     /// Encode the internal data to the data layout illustrated in the course
     /// Note: You may want to recheck if any of the expected field is missing from your output
     pub fn encode(&self) -> Bytes {
@@ -65,7 +97,7 @@ impl Block {
 
         Block {
             data: block_data,
-            offsets: offsets,
+            offsets,
         }
     }
 }
