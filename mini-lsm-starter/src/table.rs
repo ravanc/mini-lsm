@@ -204,7 +204,14 @@ impl SsTable {
 
     /// Read a block from disk, with block cache. (Day 4)
     pub fn read_block_cached(&self, block_idx: usize) -> Result<Arc<Block>> {
-        unimplemented!()
+        if let Some(block_cache) = self.block_cache.as_ref() {
+            let sst_id = self.sst_id();
+            block_cache
+                .try_get_with((sst_id, block_idx), || self.read_block(block_idx))
+                .map_err(|e| anyhow::anyhow!(e.to_string()))
+        } else {
+            self.read_block(block_idx)
+        }
     }
 
     /// Find the block that may contain `key`.
