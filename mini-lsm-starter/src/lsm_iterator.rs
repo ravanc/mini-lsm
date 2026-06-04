@@ -50,26 +50,39 @@ impl StorageIterator for LsmIterator {
     type KeyType<'a> = &'a [u8];
 
     fn is_valid(&self) -> bool {
-        self.inner.is_valid()
+        // self.inner.is_valid()
+        if !self.inner.is_valid() {
+            return false;
+        }
+
+        let key = self.inner.key().into_inner();
+
+        match &self.end_bound {
+            Bound::Unbounded => true,
+            Bound::Included(end) => key <= end.as_ref(),
+            Bound::Excluded(end) => key < end.as_ref(),
+        }
     }
 
     fn key(&self) -> &[u8] {
         let key = self.inner.key().into_inner();
-        let is_over: bool = match &self.end_bound {
-            Bound::Unbounded => false,
-            Bound::Included(end) => key > end.as_ref(),
-            Bound::Excluded(end) => key >= end.as_ref(),
-        };
+        // let is_over: bool = match &self.end_bound {
+        //     Bound::Unbounded => false,
+        //     Bound::Included(end) => key > end.as_ref(),
+        //     Bound::Excluded(end) => key >= end.as_ref(),
+        // };
 
-        if is_over { b"" } else { key }
+        // if is_over { b"" } else { key }
+        key
     }
 
     fn value(&self) -> &[u8] {
-        if self.is_valid() {
-            self.inner.value()
-        } else {
-            b""
-        }
+        // if self.is_valid() {
+        //     self.inner.value()
+        // } else {
+        //     b""
+        // }
+        self.inner.value()
     }
 
     fn next(&mut self) -> Result<()> {
@@ -86,6 +99,10 @@ impl StorageIterator for LsmIterator {
             }
         }
         Ok(())
+    }
+
+    fn num_active_iterators(&self) -> usize {
+        self.inner.num_active_iterators()
     }
 }
 
@@ -141,5 +158,9 @@ impl<I: StorageIterator> StorageIterator for FusedIterator<I> {
                 Err(e)
             }
         }
+    }
+
+    fn num_active_iterators(&self) -> usize {
+        self.iter.num_active_iterators()
     }
 }

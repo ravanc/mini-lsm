@@ -16,6 +16,7 @@
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
 use std::collections::HashMap;
+use std::fs::create_dir;
 use std::ops::{Bound, DerefMut};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -173,7 +174,8 @@ impl Drop for MiniLsm {
 
 impl MiniLsm {
     pub fn close(&self) -> Result<()> {
-        unimplemented!()
+        self.flush_notifier.send(())?;
+        Ok(())
     }
 
     /// Start the storage engine by either loading an existing directory or creating a new one if the directory does
@@ -260,6 +262,11 @@ impl LsmStorageInner {
     /// not exist.
     pub(crate) fn open(path: impl AsRef<Path>, options: LsmStorageOptions) -> Result<Self> {
         let path = path.as_ref();
+
+        if !path.exists() {
+            create_dir(path)?;
+        }
+
         let state = LsmStorageState::create(&options);
 
         let compaction_controller = match &options.compaction_options {
@@ -467,6 +474,27 @@ impl LsmStorageInner {
         let ss_table_iters = state
             .l0_sstables
             .iter()
+            .filter(|sst_id| {
+                let sst_lower = state.sstables[sst_id]
+                    .first_key()
+                    .as_key_slice()
+                    .into_inner();
+                let sst_upper = state.sstables[sst_id]
+                    .last_key()
+                    .as_key_slice()
+                    .into_inner();
+                let too_small = match _lower {
+                    Bound::Included(key) => key > sst_upper,
+                    Bound::Excluded(key) => key >= sst_upper,
+                    Bound::Unbounded => false,
+                };
+                let too_large = match _upper {
+                    Bound::Included(key) => key < sst_lower,
+                    Bound::Excluded(key) => key <= sst_lower,
+                    Bound::Unbounded => false,
+                };
+                !(too_large || too_small)
+            })
             .map(|sst_id| {
                 SsTableIterator::create_and_seek_to_key(
                     state.sstables[sst_id].clone(),
