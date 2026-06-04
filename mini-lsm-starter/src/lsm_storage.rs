@@ -38,7 +38,7 @@ use crate::lsm_iterator::{FusedIterator, LsmIterator};
 use crate::manifest::Manifest;
 use crate::mem_table::MemTable;
 use crate::mvcc::LsmMvccInner;
-use crate::table::{SsTable, SsTableIterator};
+use crate::table::{SsTable, SsTableBuilder, SsTableIterator};
 
 pub type BlockCache = moka::sync::Cache<(usize, usize), Arc<Block>>;
 
@@ -415,7 +415,28 @@ impl LsmStorageInner {
 
     /// Force flush the earliest-created immutable memtable to disk
     pub fn force_flush_next_imm_memtable(&self) -> Result<()> {
-        unimplemented!()
+        // state lock should cover this whole block, taken from mini-lsm book
+        let state_lock = self.state_lock.lock();
+        let mut new_state = self.state.read().as_ref().clone();
+        let earliest_imm_memtable =
+            new_state.imm_memtables[new_state.imm_memtables.len() - 1].clone();
+        let mut builder = SsTableBuilder::new(self.options.block_size);
+        let next_sst_id = earliest_imm_memtable.id();
+        earliest_imm_memtable.flush(&mut builder)?;
+        let sst = builder.build(
+            next_sst_id,
+            Some(self.block_cache.clone()),
+            self.path_of_sst(next_sst_id),
+        )?;
+        new_state.imm_memtables.pop();
+        new_state.sstables.insert(next_sst_id, Arc::new(sst));
+        new_state.l0_sstables.insert(0, next_sst_id);
+        {
+            // let state_lock = self.state_lock.lock();
+            let mut write_lock = self.state.write();
+            let _ = std::mem::replace(write_lock.deref_mut(), Arc::new(new_state));
+        }
+        Ok(())
     }
 
     pub fn new_txn(&self) -> Result<()> {
