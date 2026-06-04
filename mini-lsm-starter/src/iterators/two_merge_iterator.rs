@@ -15,6 +15,8 @@
 #![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
+use std::cmp::Ordering;
+
 use anyhow::Result;
 
 use super::StorageIterator;
@@ -33,7 +35,7 @@ impl<
 > TwoMergeIterator<A, B>
 {
     pub fn create(a: A, b: B) -> Result<Self> {
-        unimplemented!()
+        Ok(TwoMergeIterator { a, b })
     }
 }
 
@@ -45,18 +47,66 @@ impl<
     type KeyType<'a> = A::KeyType<'a>;
 
     fn key(&self) -> Self::KeyType<'_> {
-        unimplemented!()
+        match (self.a.is_valid(), self.b.is_valid()) {
+            (true, true) => {
+                if self.b.key() < self.a.key() {
+                    self.b.key()
+                } else {
+                    self.a.key()
+                }
+            }
+            (true, false) => self.a.key(),
+            (false, true) => self.b.key(),
+            (false, false) => unreachable!(),
+        }
     }
 
     fn value(&self) -> &[u8] {
-        unimplemented!()
+        match (self.a.is_valid(), self.b.is_valid()) {
+            (true, true) => {
+                if self.b.key() < self.a.key() {
+                    self.b.value()
+                } else {
+                    self.a.value()
+                }
+            }
+            (true, false) => self.a.value(),
+            (false, true) => self.b.value(),
+            (false, false) => unreachable!(),
+        }
     }
 
     fn is_valid(&self) -> bool {
-        unimplemented!()
+        self.a.is_valid() || self.b.is_valid()
     }
 
     fn next(&mut self) -> Result<()> {
-        unimplemented!()
+        if self.a.is_valid() && self.b.is_valid() {
+            let order = {
+                let a_key = self.a.key();
+                let b_key = self.b.key();
+                a_key.cmp(&b_key)
+            };
+            match order {
+                Ordering::Equal => {
+                    self.a.next()?;
+                    self.b.next()?;
+                }
+                Ordering::Less => {
+                    self.a.next()?;
+                }
+                Ordering::Greater => {
+                    self.b.next()?;
+                }
+            }
+        } else if self.a.is_valid() && !self.b.is_valid() {
+            self.a.next()?;
+        } else if !self.a.is_valid() && self.b.is_valid() {
+            self.b.next()?;
+        } else {
+            unreachable!()
+        }
+
+        Ok(())
     }
 }

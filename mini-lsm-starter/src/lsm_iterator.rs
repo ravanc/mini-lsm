@@ -12,22 +12,33 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Bound;
+
 use anyhow::Result;
+use bytes::Bytes;
 
 use crate::{
-    iterators::{StorageIterator, merge_iterator::MergeIterator},
+    iterators::{
+        StorageIterator, merge_iterator::MergeIterator, two_merge_iterator::TwoMergeIterator,
+    },
     mem_table::MemTableIterator,
+    table::SsTableIterator,
 };
 
 /// Represents the internal type for an LSM iterator. This type will be changed across the course for multiple times.
-type LsmIteratorInner = MergeIterator<MemTableIterator>;
+type LsmIteratorInner =
+    TwoMergeIterator<MergeIterator<MemTableIterator>, MergeIterator<SsTableIterator>>;
 pub struct LsmIterator {
     inner: LsmIteratorInner,
+    end_bound: Bound<Bytes>,
 }
 
 impl LsmIterator {
-    pub(crate) fn new(iter: LsmIteratorInner) -> Result<Self> {
-        let mut iter = Self { inner: iter };
+    pub(crate) fn new(iter: LsmIteratorInner, end_bound: Bound<Bytes>) -> Result<Self> {
+        let mut iter = Self {
+            inner: iter,
+            end_bound,
+        };
         while iter.is_valid() && iter.value().is_empty() {
             iter.inner.next()?;
         }
@@ -43,20 +54,35 @@ impl StorageIterator for LsmIterator {
     }
 
     fn key(&self) -> &[u8] {
-        self.inner.key().into_inner()
+        let key = self.inner.key().into_inner();
+        let is_over: bool = match &self.end_bound {
+            Bound::Unbounded => false,
+            Bound::Included(end) => key > end.as_ref(),
+            Bound::Excluded(end) => key >= end.as_ref(),
+        };
+
+        if is_over { b"" } else { key }
     }
 
     fn value(&self) -> &[u8] {
-        self.inner.value()
+        if self.is_valid() {
+            self.inner.value()
+        } else {
+            b""
+        }
     }
 
     fn next(&mut self) -> Result<()> {
         self.inner.next()?;
         if self.inner.is_valid() {
             let mut value = self.inner.value();
-            while value.is_empty() {
+            while value.is_empty() && self.inner.is_valid() {
                 self.inner.next()?;
-                value = self.inner.value();
+                if self.inner.is_valid() {
+                    value = self.inner.value();
+                } else {
+                    break;
+                }
             }
         }
         Ok(())
