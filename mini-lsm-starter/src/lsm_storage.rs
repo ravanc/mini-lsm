@@ -329,17 +329,18 @@ impl LsmStorageInner {
         let ss_table_iters = state_clone
             .l0_sstables
             .iter()
-            .map(|sst_id| {
-                SsTableIterator::create_and_seek_to_key(
-                    state_clone.sstables[sst_id].clone(),
-                    Key::from_slice(_key),
-                )
-                .map(Box::new)
+            .map(|sst_id| state_clone.sstables[sst_id].clone())
+            .filter(|sst| {
+                sst.bloom.as_ref().map_or(true, |bloom| {
+                    bloom.may_contain(farmhash::fingerprint32(_key))
+                })
+            })
+            .map(|sst| {
+                SsTableIterator::create_and_seek_to_key(sst, Key::from_slice(_key)).map(Box::new)
             })
             .collect::<Result<Vec<_>>>()?;
 
         let ss_merge_iter = MergeIterator::create(ss_table_iters);
-
         if ss_merge_iter.is_valid() && ss_merge_iter.key().into_inner() == _key {
             let value = ss_merge_iter.value();
             if value.is_empty() {

@@ -94,6 +94,15 @@ impl Bloom {
 
         // TODO: build the bloom filter
 
+        for key in keys {
+            let mut h = key.clone();
+            let delta = (key >> 17) | (key << 15);
+            for _ in 0..k {
+                filter.set_bit(h as usize % nbits, true);
+                h = h.wrapping_add(delta);
+            }
+        }
+
         Self {
             filter: filter.freeze(),
             k: k as u8,
@@ -111,7 +120,15 @@ impl Bloom {
 
             // TODO: probe the bloom filter
 
-            true
+            let mut res = true;
+            let mut h = h;
+
+            for _ in 0..self.k {
+                res &= self.filter.get_bit(h as usize % nbits);
+                h = h.wrapping_add(delta);
+            }
+
+            res
         }
     }
 }

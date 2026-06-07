@@ -23,7 +23,7 @@ use crate::{
     block::BlockBuilder,
     key::{KeyBytes, KeySlice},
     lsm_storage::BlockCache,
-    table::FileObject,
+    table::{FileObject, bloom::Bloom},
 };
 
 /// Builds an SSTable from key-value pairs.
@@ -31,6 +31,7 @@ pub struct SsTableBuilder {
     builder: BlockBuilder,
     first_key: Vec<u8>,
     last_key: Vec<u8>,
+    key_hashes: Vec<u32>,
     data: Vec<u8>,
     pub(crate) meta: Vec<BlockMeta>,
     block_size: usize,
@@ -43,6 +44,7 @@ impl SsTableBuilder {
             builder: BlockBuilder::new(block_size),
             first_key: vec![],
             last_key: vec![],
+            key_hashes: vec![],
             data: vec![],
             meta: vec![],
             block_size,
@@ -99,6 +101,8 @@ impl SsTableBuilder {
         }
 
         self.last_key = key.to_key_vec().into_inner();
+
+        self.key_hashes.push(farmhash::fingerprint32(key.raw_ref()));
     }
 
     /// Get the estimated size of the SSTable.
@@ -146,12 +150,19 @@ impl SsTableBuilder {
             self.meta.push(old_block_meta);
         }
 
+        let bits_per_key = Bloom::bloom_bits_per_key(self.key_hashes.len(), 0.01);
+        let bloom = Bloom::build_from_key_hashes(&self.key_hashes, bits_per_key);
+
         let mut metadata_buf = vec![];
         BlockMeta::encode_block_meta(&self.meta, &mut metadata_buf);
         let mut data = self.data.clone();
         data.extend_from_slice(&metadata_buf);
-        let block_meta_offset: usize = self.data.len();
+        let block_meta_offset = self.data.len();
         data.extend_from_slice(&(block_meta_offset as u32).to_be_bytes());
+
+        let bloom_offset = data.len();
+        Bloom::encode(&bloom, &mut data);
+        data.extend_from_slice(&(bloom_offset as u32).to_be_bytes());
 
         Ok(SsTable {
             file: FileObject::create(path.as_ref(), data)?,
@@ -161,7 +172,7 @@ impl SsTableBuilder {
             block_cache,
             first_key: KeyBytes::from_bytes(bytes::Bytes::from(self.first_key)),
             last_key: KeyBytes::from_bytes(bytes::Bytes::from(self.last_key)),
-            bloom: None,
+            bloom: Some(bloom),
             max_ts: 0,
         })
     }
