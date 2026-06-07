@@ -331,9 +331,9 @@ impl LsmStorageInner {
             .iter()
             .map(|sst_id| state_clone.sstables[sst_id].clone())
             .filter(|sst| {
-                sst.bloom.as_ref().map_or(true, |bloom| {
-                    bloom.may_contain(farmhash::fingerprint32(_key))
-                })
+                sst.bloom
+                    .as_ref()
+                    .is_none_or(|bloom| bloom.may_contain(farmhash::fingerprint32(_key)))
             })
             .map(|sst| {
                 SsTableIterator::create_and_seek_to_key(sst, Key::from_slice(_key)).map(Box::new)

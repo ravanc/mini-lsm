@@ -36,8 +36,48 @@ pub struct BlockIterator {
 }
 
 impl BlockIterator {
+    fn get_key_overlap_len_at(&self, position: u16) -> u16 {
+        let offset = self.block.offsets[position as usize] as usize;
+        u16::from_be_bytes([self.block.data[offset], self.block.data[offset + 1]])
+    }
+
+    fn get_rest_key_len_at(&self, position: u16) -> u16 {
+        let offset = self.block.offsets[position as usize] as usize;
+        u16::from_be_bytes([self.block.data[offset + 2], self.block.data[offset + 3]])
+    }
+
+    fn get_key_at(&self, position: u16) -> KeyVec {
+        let offset = self.block.offsets[position as usize] as usize;
+        let key_overlap_len = self.get_key_overlap_len_at(position) as usize;
+        let rest_key_len = self.get_rest_key_len_at(position) as usize;
+        let rest_key = &self.block.data[offset + 4..offset + rest_key_len + 4];
+        let overlap_key = &self.first_key.raw_ref()[..key_overlap_len];
+        let key = [overlap_key, rest_key].concat();
+        KeyVec::from_vec(key)
+    }
+
+    fn get_value_len_at(&self, position: u16) -> u16 {
+        let offset = self.block.offsets[position as usize] as usize;
+        let key_len = self.get_rest_key_len_at(position) as usize;
+        u16::from_be_bytes([
+            self.block.data[offset + 4 + key_len],
+            self.block.data[offset + 5 + key_len],
+        ])
+    }
+
+    fn get_value_range_at(&self, position: u16) -> (usize, usize) {
+        let offset = self.block.offsets[position as usize] as usize;
+        let key_len = self.get_rest_key_len_at(position) as usize;
+        let value_len = self.get_value_len_at(position) as usize;
+        (
+            offset + 4 + key_len + 2,
+            offset + 4 + key_len + 2 + value_len,
+        )
+    }
+
     fn new(block: Arc<Block>) -> Self {
-        let first_key = block.get_key_at(0);
+        let rest_key_len = u16::from_be_bytes([block.data[2], block.data[3]]) as usize;
+        let first_key = KeyVec::from_vec(block.data[4..4 + rest_key_len].to_vec());
 
         Self {
             block,
@@ -84,8 +124,10 @@ impl BlockIterator {
     /// Seeks to the first key in the block.
     pub fn seek_to_first(&mut self) {
         self.idx = 0;
-        self.key = self.block.get_key_at(0);
-        self.value_range = self.block.get_value_range_at(0);
+        let first_key = self.get_key_at(0);
+        self.key = first_key;
+        let value_range = self.get_value_range_at(0);
+        self.value_range = value_range;
     }
 
     /// Move to the next key in the block.
@@ -94,8 +136,8 @@ impl BlockIterator {
         if self.idx >= self.block.offsets.len() {
             self.key = KeyVec::new();
         } else {
-            let key = self.block.get_key_at(self.idx as u16);
-            let value_range = self.block.get_value_range_at(self.idx as u16);
+            let key = self.get_key_at(self.idx as u16);
+            let value_range = self.get_value_range_at(self.idx as u16);
             self.key = key;
             self.value_range = value_range
         }

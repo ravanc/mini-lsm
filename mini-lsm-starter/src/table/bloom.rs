@@ -95,8 +95,9 @@ impl Bloom {
         // TODO: build the bloom filter
 
         for key in keys {
-            let mut h = key.clone();
-            let delta = (key >> 17) | (key << 15);
+            let mut h = *key;
+            // let delta = (key >> 17) | (key << 15);
+            let delta = key.rotate_left(15);
             for _ in 0..k {
                 filter.set_bit(h as usize % nbits, true);
                 h = h.wrapping_add(delta);

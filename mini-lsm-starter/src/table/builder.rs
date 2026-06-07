@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use bytes::BufMut;
+use bytes::{BufMut, Bytes};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -71,19 +71,26 @@ impl SsTableBuilder {
             let block_offset = self.data.len();
             self.data.put(old_block.encode());
 
-            let first_key_len = u16::from_be_bytes([old_block.data[0], old_block.data[1]]) as usize;
-            let first_key = KeyBytes::from_bytes(bytes::Bytes::copy_from_slice(
-                &old_block.data[2..first_key_len + 2],
-            ));
+            // entry 0 is uncompressed: overlap(=0)(u16) | rest_len(u16) | key
+            let first_key_len = u16::from_be_bytes([old_block.data[2], old_block.data[3]]) as usize;
+            let first_key_bytes =
+                bytes::Bytes::copy_from_slice(&old_block.data[4..first_key_len + 4]);
+            let first_key = KeyBytes::from_bytes(first_key_bytes.clone());
 
             let last_key_offset = old_block.offsets[old_block.offsets.len() - 1] as usize;
-            let last_key_len = u16::from_be_bytes([
+            let last_key_overlap_len = u16::from_be_bytes([
                 old_block.data[last_key_offset],
                 old_block.data[last_key_offset + 1],
             ]) as usize;
-            let last_key = KeyBytes::from_bytes(bytes::Bytes::copy_from_slice(
-                &old_block.data[last_key_offset + 2..last_key_offset + last_key_len + 2],
-            ));
+            let last_key_rest_len = u16::from_be_bytes([
+                old_block.data[last_key_offset + 2],
+                old_block.data[last_key_offset + 3],
+            ]) as usize;
+            let last_key_rest =
+                &old_block.data[last_key_offset + 4..last_key_offset + last_key_rest_len + 4];
+            let overlap = &first_key_bytes[..last_key_overlap_len];
+            let last_key_bytes = [overlap, last_key_rest].concat();
+            let last_key = KeyBytes::from_bytes(Bytes::from(last_key_bytes));
 
             let old_block_meta = BlockMeta {
                 offset: block_offset,
@@ -127,19 +134,25 @@ impl SsTableBuilder {
 
             self.data.put(old_block.encode());
 
-            let first_key_len = u16::from_be_bytes([old_block.data[0], old_block.data[1]]) as usize;
-            let first_key = KeyBytes::from_bytes(bytes::Bytes::copy_from_slice(
-                &old_block.data[2..first_key_len + 2],
-            ));
+            let first_key_len = u16::from_be_bytes([old_block.data[2], old_block.data[3]]) as usize;
+            let first_key_bytes =
+                bytes::Bytes::copy_from_slice(&old_block.data[4..first_key_len + 4]);
+            let first_key = KeyBytes::from_bytes(first_key_bytes.clone());
 
             let last_key_offset = old_block.offsets[old_block.offsets.len() - 1] as usize;
-            let last_key_len = u16::from_be_bytes([
+            let last_key_overlap_len = u16::from_be_bytes([
                 old_block.data[last_key_offset],
                 old_block.data[last_key_offset + 1],
             ]) as usize;
-            let last_key = KeyBytes::from_bytes(bytes::Bytes::copy_from_slice(
-                &old_block.data[last_key_offset + 2..last_key_offset + last_key_len + 2],
-            ));
+            let last_key_rest_len = u16::from_be_bytes([
+                old_block.data[last_key_offset + 2],
+                old_block.data[last_key_offset + 3],
+            ]) as usize;
+            let last_key_rest =
+                &old_block.data[last_key_offset + 4..last_key_offset + last_key_rest_len + 4];
+            let overlap = &first_key_bytes[..last_key_overlap_len];
+            let last_key_bytes = [overlap, last_key_rest].concat();
+            let last_key = KeyBytes::from_bytes(Bytes::from(last_key_bytes));
 
             let old_block_meta = BlockMeta {
                 offset: block_offset,

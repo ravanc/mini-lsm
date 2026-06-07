@@ -55,12 +55,34 @@ impl BlockBuilder {
             return false;
         }
         self.offsets.push(offset as u16);
+        if self.first_key.is_empty() {
+            self.first_key.set_from_slice(key);
+            self.data.put_u16(0); // overlap_len
+            self.data.put_u16(key_len as u16); // rest_key_len
+            self.data.put(key.into_inner());
+            self.data.put_u16(value_len as u16);
+            self.data.put(value);
+        }
+        /*
+        pre-compression optimisation
         self.data.put_u16(key_len as u16);
         self.data.put(key.into_inner());
         self.data.put_u16(value_len as u16);
         self.data.put(value);
-        if self.first_key.is_empty() {
-            self.first_key.set_from_slice(key);
+        */
+        else {
+            let key_overlap_len = key
+                .into_inner()
+                .iter()
+                .zip(self.first_key.raw_ref().iter())
+                .take_while(|(a, b)| a == b)
+                .count();
+            self.data.put_u16(key_overlap_len as u16);
+            let rest_key_len = key.len() - key_overlap_len;
+            self.data.put_u16(rest_key_len as u16);
+            self.data.put(&key.into_inner()[key_overlap_len..]);
+            self.data.put_u16(value_len as u16);
+            self.data.put(value);
         }
         true
     }
