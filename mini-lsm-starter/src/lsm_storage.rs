@@ -331,6 +331,12 @@ impl LsmStorageInner {
             .iter()
             .map(|sst_id| state_clone.sstables[sst_id].clone())
             .filter(|sst| {
+                // Bench toggle (the single variable): when BLOOM_DISABLED is set,
+                // skip the filter so the same loaded SSTs can be measured with and
+                // without the bloom. Inert in normal operation.
+                if crate::table::BLOOM_DISABLED.load(std::sync::atomic::Ordering::Relaxed) {
+                    return true;
+                }
                 sst.bloom.as_ref().map_or(true, |bloom| {
                     bloom.may_contain(farmhash::fingerprint32(_key))
                 })

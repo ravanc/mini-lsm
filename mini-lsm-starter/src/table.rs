@@ -34,6 +34,12 @@ use crate::lsm_storage::BlockCache;
 
 use self::bloom::Bloom;
 
+/// Bench toggle: when true, `get` ignores the bloom filter. This is the single
+/// variable the `bench` binary flips between measurements; everything else in
+/// the engine stays constant. Inert (false) in normal operation.
+pub static BLOOM_DISABLED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BlockMeta {
     /// Offset of this data block.
