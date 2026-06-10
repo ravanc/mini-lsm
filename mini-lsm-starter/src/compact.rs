@@ -30,8 +30,10 @@ pub use simple_leveled::{
 };
 pub use tiered::{TieredCompactionController, TieredCompactionOptions, TieredCompactionTask};
 
+use crate::iterators::StorageIterator;
+use crate::iterators::merge_iterator::MergeIterator;
 use crate::lsm_storage::{LsmStorageInner, LsmStorageState};
-use crate::table::SsTable;
+use crate::table::{SsTable, SsTableBuilder, SsTableIterator};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum CompactionTask {
@@ -128,7 +130,95 @@ impl LsmStorageInner {
     }
 
     pub fn force_full_compaction(&self) -> Result<()> {
-        unimplemented!()
+        let new_state = self.state.read().as_ref().clone();
+        let original_l0 = new_state.l0_sstables.clone();
+        let combined_sst_ids = new_state
+            .l0_sstables
+            .iter()
+            .chain(new_state.levels[0].1.iter())
+            .copied() // need to have this for some reason
+            .collect::<Vec<_>>();
+
+        let combined_sst = combined_sst_ids
+            .iter()
+            .map(|sst_id| new_state.sstables[sst_id].clone())
+            .map(|sst| SsTableIterator::create_and_seek_to_first(sst).map(Box::new))
+            .collect::<Result<Vec<_>>>()?;
+
+        println!("COMBINED_SST LEN {}", combined_sst.len());
+
+        let mut merge_iter = MergeIterator::create(combined_sst);
+        let mut builder = SsTableBuilder::new(self.options.block_size);
+        let mut new_l1 = vec![];
+        let mut compacted_sst = vec![];
+
+        while merge_iter.is_valid() {
+            println!("ADDED KEY {:?}", merge_iter.key());
+            if merge_iter.value() != b"" {
+                builder.add(merge_iter.key(), merge_iter.value());
+                if builder.estimated_size() > self.options.target_sst_size {
+                    let sst_id = self.next_sst_id();
+                    let old_builder = std::mem::replace(
+                        &mut builder,
+                        SsTableBuilder::new(self.options.block_size),
+                    );
+                    let sst = old_builder.build(
+                        sst_id,
+                        Some(self.block_cache.clone()),
+                        self.path_of_sst(sst_id),
+                    )?;
+                    new_l1.push(sst_id);
+                    compacted_sst.push((sst_id, Arc::new(sst)));
+                }
+            }
+            merge_iter.next()?;
+        }
+
+        if builder.estimated_size() > 0 {
+            let sst_id = self.next_sst_id();
+            let sst = builder.build(
+                sst_id,
+                Some(self.block_cache.clone()),
+                self.path_of_sst(sst_id),
+            )?;
+            new_l1.push(sst_id);
+            compacted_sst.push((sst_id, Arc::new(sst)));
+            println!("BLOCK ADDED CASE 2");
+        }
+
+        let mut write_lock = self.state.write();
+        let mut state_clone = write_lock.as_ref().clone();
+
+        let mut new_sstables = state_clone.sstables.clone();
+        let mut new_l0 = state_clone.l0_sstables.clone();
+        new_l0.retain(|sst_id| !original_l0.contains(sst_id));
+        for sst_id in &combined_sst_ids {
+            new_sstables.remove(sst_id);
+        }
+
+        for (sst_id, sst_arc) in compacted_sst {
+            new_sstables.insert(sst_id, sst_arc);
+        }
+
+        state_clone.l0_sstables = new_l0;
+        println!("L1 LEN {}", new_l1.len());
+        state_clone.levels = vec![(1, new_l1)];
+        state_clone.sstables = new_sstables;
+
+        // apparently std::mem::replace does not work here?
+        *write_lock = Arc::new(state_clone);
+        // *write_lock = Arc::new(new_state);
+        // my original implementation was wrong because i used new_state cloned
+        // at the start, which does not take into account changes in memtable
+        // found this issue by asking claude the follow on question
+
+        drop(write_lock);
+
+        for removed_sst_id in combined_sst_ids {
+            std::fs::remove_file(self.path_of_sst(removed_sst_id))?; // need this, if not the files will start bloating
+        }
+
+        Ok(())
     }
 
     fn trigger_compaction(&self) -> Result<()> {
