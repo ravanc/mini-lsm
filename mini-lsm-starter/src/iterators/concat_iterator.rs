@@ -35,6 +35,13 @@ pub struct SstConcatIterator {
 
 impl SstConcatIterator {
     pub fn create_and_seek_to_first(sstables: Vec<Arc<SsTable>>) -> Result<Self> {
+        if sstables.is_empty() {
+            return Ok(Self {
+                current: None,
+                next_sst_idx: 0,
+                sstables,
+            });
+        }
         let current = SsTableIterator::create_and_seek_to_first(sstables[0].clone())?;
         Ok(Self {
             current: Some(current),
@@ -44,6 +51,13 @@ impl SstConcatIterator {
     }
 
     pub fn create_and_seek_to_key(sstables: Vec<Arc<SsTable>>, key: KeySlice) -> Result<Self> {
+        if sstables.is_empty() {
+            return Ok(Self {
+                current: None,
+                next_sst_idx: 0,
+                sstables,
+            });
+        }
         // claude given idiomatic way of finding first index where first_key < key
         let mut idx = sstables.partition_point(|sst| sst.first_key().as_key_slice() < key);
         idx = if idx == 0 { 0 } else { idx - 1 };

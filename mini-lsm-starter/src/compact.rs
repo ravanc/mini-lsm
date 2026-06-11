@@ -31,7 +31,9 @@ pub use simple_leveled::{
 pub use tiered::{TieredCompactionController, TieredCompactionOptions, TieredCompactionTask};
 
 use crate::iterators::StorageIterator;
+use crate::iterators::concat_iterator::SstConcatIterator;
 use crate::iterators::merge_iterator::MergeIterator;
+use crate::iterators::two_merge_iterator::TwoMergeIterator;
 use crate::lsm_storage::{LsmStorageInner, LsmStorageState};
 use crate::table::{SsTable, SsTableBuilder, SsTableIterator};
 
@@ -130,30 +132,44 @@ impl LsmStorageInner {
     }
 
     pub fn force_full_compaction(&self) -> Result<()> {
-        let new_state = self.state.read().as_ref().clone();
-        let original_l0 = new_state.l0_sstables.clone();
-        let combined_sst_ids = new_state
+        let state = self.state.read().as_ref().clone();
+        let original_l0 = state.l0_sstables.clone();
+        let combined_sst_ids = state
             .l0_sstables
             .iter()
-            .chain(new_state.levels[0].1.iter())
+            .chain(state.levels[0].1.iter())
             .copied() // need to have this for some reason
             .collect::<Vec<_>>();
 
-        let combined_sst = combined_sst_ids
+        // let combined_sst = combined_sst_ids
+        //     .iter()
+        //     .map(|sst_id| state.sstables[sst_id].clone())
+        //     .map(|sst| SsTableIterator::create_and_seek_to_first(sst).map(Box::new))
+        //     .collect::<Result<Vec<_>>>()?;
+
+        let l0_sst_iters = state
+            .l0_sstables
             .iter()
-            .map(|sst_id| new_state.sstables[sst_id].clone())
-            .map(|sst| SsTableIterator::create_and_seek_to_first(sst).map(Box::new))
+            .map(|sst_id| {
+                SsTableIterator::create_and_seek_to_first(state.sstables[sst_id].clone())
+                    .map(Box::new)
+            })
             .collect::<Result<Vec<_>>>()?;
+        let l0_merge_iter = MergeIterator::create(l0_sst_iters);
+        let l1_concat_iter = SstConcatIterator::create_and_seek_to_first(
+            state.levels[0]
+                .1
+                .iter()
+                .map(|sst_id| state.sstables[sst_id].clone())
+                .collect::<Vec<_>>(),
+        )?;
 
-        println!("COMBINED_SST LEN {}", combined_sst.len());
-
-        let mut merge_iter = MergeIterator::create(combined_sst);
+        let mut merge_iter = TwoMergeIterator::create(l0_merge_iter, l1_concat_iter)?;
         let mut builder = SsTableBuilder::new(self.options.block_size);
         let mut new_l1 = vec![];
         let mut compacted_sst = vec![];
 
         while merge_iter.is_valid() {
-            println!("ADDED KEY {:?}", merge_iter.key());
             if merge_iter.value() != b"" {
                 builder.add(merge_iter.key(), merge_iter.value());
                 if builder.estimated_size() > self.options.target_sst_size {
@@ -183,7 +199,6 @@ impl LsmStorageInner {
             )?;
             new_l1.push(sst_id);
             compacted_sst.push((sst_id, Arc::new(sst)));
-            println!("BLOCK ADDED CASE 2");
         }
 
         let mut write_lock = self.state.write();
@@ -201,7 +216,6 @@ impl LsmStorageInner {
         }
 
         state_clone.l0_sstables = new_l0;
-        println!("L1 LEN {}", new_l1.len());
         state_clone.levels = vec![(1, new_l1)];
         state_clone.sstables = new_sstables;
 

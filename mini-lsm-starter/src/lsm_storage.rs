@@ -32,9 +32,10 @@ use crate::compact::{
     SimpleLeveledCompactionController, SimpleLeveledCompactionOptions, TieredCompactionController,
 };
 use crate::iterators::StorageIterator;
+use crate::iterators::concat_iterator::SstConcatIterator;
 use crate::iterators::merge_iterator::MergeIterator;
 use crate::iterators::two_merge_iterator::TwoMergeIterator;
-use crate::key::Key;
+use crate::key::{Key, KeySlice};
 use crate::lsm_iterator::{FusedIterator, LsmIterator};
 use crate::manifest::Manifest;
 use crate::mem_table::MemTable;
@@ -340,7 +341,19 @@ impl LsmStorageInner {
             })
             .collect::<Result<Vec<_>>>()?;
 
-        let ss_merge_iter = MergeIterator::create(ss_table_iters);
+        let l0_merge_iter = MergeIterator::create(ss_table_iters);
+
+        let l1_concat_iter = SstConcatIterator::create_and_seek_to_key(
+            state_clone.levels[0]
+                .1
+                .iter()
+                .map(|sst_id| state_clone.sstables[sst_id].clone())
+                .collect::<Vec<_>>(),
+            KeySlice::from_slice(_key),
+        )?;
+
+        let ss_merge_iter = TwoMergeIterator::create(l0_merge_iter, l1_concat_iter)?;
+
         if ss_merge_iter.is_valid() && ss_merge_iter.key().into_inner() == _key {
             let value = ss_merge_iter.value();
             if value.is_empty() {
@@ -514,8 +527,24 @@ impl LsmStorageInner {
             ss_merge_iter.next()?;
         }
 
+        let memtable_l0_iter = TwoMergeIterator::create(mem_merge_iter, ss_merge_iter)?;
+
+        let l1_ssts = state.levels[0]
+            .1
+            .iter()
+            .map(|sst_id| state.sstables[sst_id].clone())
+            .collect::<Vec<_>>();
+        let l1_concat_iter = SstConcatIterator::create_and_seek_to_key(
+            l1_ssts,
+            KeySlice::from_slice(lower_bound_key),
+        )?;
+
+        // let lsm_iter = LsmIterator::new(
+        //     TwoMergeIterator::create(mem_merge_iter, ss_merge_iter)?,
+        //     _upper.map(Bytes::copy_from_slice),
+        // )?;
         let lsm_iter = LsmIterator::new(
-            TwoMergeIterator::create(mem_merge_iter, ss_merge_iter)?,
+            TwoMergeIterator::create(memtable_l0_iter, l1_concat_iter)?,
             _upper.map(Bytes::copy_from_slice),
         )?;
         let fused_iter = FusedIterator::new(lsm_iter);
