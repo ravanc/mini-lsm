@@ -35,6 +35,7 @@ pub struct SsTableBuilder {
     data: Vec<u8>,
     pub(crate) meta: Vec<BlockMeta>,
     block_size: usize,
+    is_empty: bool,
 }
 
 impl SsTableBuilder {
@@ -48,6 +49,7 @@ impl SsTableBuilder {
             data: vec![],
             meta: vec![],
             block_size,
+            is_empty: true,
         }
     }
 
@@ -62,6 +64,7 @@ impl SsTableBuilder {
         // after getting the old block builder, take first_key, find last_key, get offset, and write to metadata
         // if first_key is empty, set first_key
         // replace last_key
+        self.is_empty = false;
         let block_full = !self.builder.add(key, value);
         if block_full {
             let old_block_builder =
@@ -119,6 +122,10 @@ impl SsTableBuilder {
     pub fn estimated_size(&self) -> usize {
         // since one BlockMeta per block, we estimate there to be BlockMeta + 1 blocks, 1 for the builder
         (self.meta.len() + 1) * self.block_size
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.is_empty
     }
 
     /// Builds the SSTable and writes it to the given path. Use the `FileObject` structure to manipulate the disk objects.
