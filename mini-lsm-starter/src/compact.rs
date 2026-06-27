@@ -249,7 +249,60 @@ impl LsmStorageInner {
                 }
             }
             CompactionTask::Tiered(task) => {
-                unimplemented!()
+                let state = self.state.read().clone();
+                let tiers = &task.tiers;
+
+                let concat_iters = task
+                    .tiers
+                    .iter()
+                    .map(|tier| {
+                        SstConcatIterator::create_and_seek_to_first(
+                            tier.1
+                                .iter()
+                                .map(|sst_id| state.sstables[sst_id].clone())
+                                .collect::<Vec<_>>(),
+                        )
+                    })
+                    .collect::<Result<Vec<_>>>()?
+                    .into_iter()
+                    .map(Box::new)
+                    .collect::<Vec<_>>();
+
+                let mut merge_iter = MergeIterator::create(concat_iters);
+
+                let mut builder = SsTableBuilder::new(block_size);
+                let mut output = vec![];
+                while merge_iter.is_valid() {
+                    if merge_iter.value() != b"" || !task.bottom_tier_included {
+                        builder.add(merge_iter.key(), merge_iter.value());
+                        if builder.estimated_size() > self.options.target_sst_size {
+                            let sst_id = self.next_sst_id();
+                            let old_builder = std::mem::replace(
+                                &mut builder,
+                                SsTableBuilder::new(self.options.block_size),
+                            );
+                            let sst = old_builder.build(
+                                sst_id,
+                                Some(self.block_cache.clone()),
+                                self.path_of_sst(sst_id),
+                            )?;
+                            output.push(Arc::new(sst));
+                        }
+                    }
+                    merge_iter.next()?;
+                }
+
+                if !builder.is_empty() {
+                    let sst_id = self.next_sst_id();
+                    let sst = builder.build(
+                        sst_id,
+                        Some(self.block_cache.clone()),
+                        self.path_of_sst(sst_id),
+                    )?;
+                    output.push(Arc::new(sst));
+                }
+
+                Ok(output)
             }
         }
     }
