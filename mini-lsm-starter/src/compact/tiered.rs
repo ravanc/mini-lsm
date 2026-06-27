@@ -55,11 +55,9 @@ impl TieredCompactionController {
             .fold(0, |size, level| size + level.1.len());
         let last_level_size = _snapshot.levels[_snapshot.levels.len() - 1].1.len();
 
-        // println!("SPACE AMP EVAL {}, THRESHOLD {}", engine_size * 100 / last_level_size, self.options.max_size_amplification_percent);
         if (last_level_size == 0 && engine_size > 0)
             || (engine_size * 100 / last_level_size >= self.options.max_size_amplification_percent)
         {
-            // println!("\nSPACE AMP TRIGGER\n");
             return Some(TieredCompactionTask {
                 tiers: _snapshot.levels.clone(),
                 bottom_tier_included: true,
@@ -73,11 +71,9 @@ impl TieredCompactionController {
                 prev += _snapshot.levels[i].1.len();
                 continue;
             }
-            // println!("SIZE RATIO EVAL {}, THRESHOLD {}", _snapshot.levels[i].1.len() * 100 / prev, self.options.size_ratio);
             if _snapshot.levels[i].1.len() * 100 / prev > 100 + self.options.size_ratio
                 && i >= self.options.min_merge_width
             {
-                // println!("\nSIZE RATIO TRIGGER\n");
                 return Some(TieredCompactionTask {
                     tiers: _snapshot.levels[..i].to_vec(),
                     bottom_tier_included: false,
@@ -86,7 +82,6 @@ impl TieredCompactionController {
             prev += _snapshot.levels[i].1.len();
         }
 
-        // println!("\nFALLBACK TRIGGER\n");
         // third trigger (fallback): major compaction
         let max_merge = self
             .options
