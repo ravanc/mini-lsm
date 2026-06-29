@@ -16,11 +16,12 @@
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
 use anyhow::Result;
+use bytes::Buf;
 use bytes::Bytes;
 use crossbeam_skiplist::SkipMap;
 use parking_lot::Mutex;
 use std::fs::File;
-use std::io::BufWriter;
+use std::io::{BufWriter, Write};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -32,15 +33,53 @@ pub struct Wal {
 
 impl Wal {
     pub fn create(_path: impl AsRef<Path>) -> Result<Self> {
-        unimplemented!()
+        // let file = if _path.as_ref().exists() {
+        //     std::fs::File::options().read(true).write(true).open(_path)?
+        // } else {
+        //     std::fs::File::options().read(true).write(true).create(true).create(_path)?
+        // };
+        // Ok(Wal {
+        //     file: Arc::new(Mutex::new(BufWriter::new(file))),
+        // })
+
+        // important, if not unable to read/write
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(_path)?;
+        Ok(Wal {
+        file: Arc::new(Mutex::new(BufWriter::new(file))),
+    })
     }
 
     pub fn recover(_path: impl AsRef<Path>, _skiplist: &SkipMap<Bytes, Bytes>) -> Result<Self> {
-        unimplemented!()
+        // important, otherwise multi-sessions wouldnt work
+        let file = std::fs::File::options().read(true).append(true).open(&_path)?;
+        let binding = std::fs::read(_path)?;
+        let mut wal = binding.as_slice();
+        while wal.has_remaining() {
+            let key_len = wal.get_u16() as usize;
+            let key = wal.copy_to_bytes(key_len);
+            let value_len = wal.get_u16() as usize;
+            let value = wal.copy_to_bytes(value_len);
+            _skiplist.insert(key, value);
+        }
+        Ok(Wal {
+            file: Arc::new(Mutex::new(BufWriter::new(file))),
+        })
     }
 
     pub fn put(&self, _key: &[u8], _value: &[u8]) -> Result<()> {
-        unimplemented!()
+        let mut lock = self.file.lock();
+        let key_len = (_key.len() as u16).to_be_bytes();
+        let value_len = (_value.len() as u16).to_be_bytes();
+        lock.write_all(&key_len)?;
+        lock.write_all(_key)?;
+        lock.write_all(&value_len)?;
+        lock.write_all(_value)?;
+        Ok(())
     }
 
     /// Implement this in week 3, day 5; if you want to implement this earlier, use `&[u8]` as the key type.
@@ -49,6 +88,9 @@ impl Wal {
     }
 
     pub fn sync(&self) -> Result<()> {
-        unimplemented!()
+        let mut file = self.file.lock();
+        file.flush()?;
+        file.get_mut().sync_all()?;
+        Ok(())
     }
 }

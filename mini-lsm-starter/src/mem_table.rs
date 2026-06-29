@@ -63,12 +63,28 @@ impl MemTable {
 
     /// Create a new mem-table with WAL
     pub fn create_with_wal(_id: usize, _path: impl AsRef<Path>) -> Result<Self> {
-        unimplemented!()
+        Ok(MemTable {
+            map: Arc::new(SkipMap::new()),
+            wal: Some(Wal::create(_path)?),
+            id: _id,
+            approximate_size: Arc::new(AtomicUsize::new(0)),
+        })
     }
 
     /// Create a memtable from WAL
     pub fn recover_from_wal(_id: usize, _path: impl AsRef<Path>) -> Result<Self> {
-        unimplemented!()
+        let map = Arc::new(SkipMap::new());
+        let wal = Wal::recover(&_path, &map)?;
+        let approximate_size = map
+            .iter()
+            .map(|entry| entry.key().len() + entry.value().len())
+            .sum();
+        Ok(MemTable {
+            map,
+            wal: Some(wal),
+            id: _id,
+            approximate_size: Arc::new(AtomicUsize::new(approximate_size)),
+        })
     }
 
     pub fn for_testing_put_slice(&self, key: &[u8], value: &[u8]) -> Result<()> {
@@ -103,6 +119,7 @@ impl MemTable {
     pub fn put(&self, _key: &[u8], _value: &[u8]) -> Result<()> {
         self.map
             .insert(Bytes::copy_from_slice(_key), Bytes::copy_from_slice(_value));
+        self.wal.as_ref().map(|wal| wal.put(_key, _value));
         self.approximate_size.fetch_add(
             _key.len() + _value.len(),
             std::sync::atomic::Ordering::SeqCst,

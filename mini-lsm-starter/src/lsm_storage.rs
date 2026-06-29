@@ -76,6 +76,7 @@ impl LsmStorageState {
             CompactionOptions::Tiered(_) => Vec::new(),
             CompactionOptions::NoCompaction => vec![(1, Vec::new())],
         };
+
         Self {
             memtable: Arc::new(MemTable::create(0)),
             imm_memtables: Vec::new(),
@@ -197,6 +198,8 @@ impl MiniLsm {
                 self.inner.force_flush_next_imm_memtable()?;
             }
         }
+
+        self.sync()?;
         self.inner.sync_dir()?;
         Ok(())
     }
@@ -330,7 +333,16 @@ impl LsmStorageInner {
                     let _ = std::mem::replace(&mut state, new_state);
                 }
                 ManifestRecord::NewMemtable(sst_id) => {
-                    unimplemented!()
+                    next_sst_id = std::cmp::max(next_sst_id, sst_id);
+                    let wal_path = path.join(format!("{sst_id}.wal"));
+                    if wal_path.exists() {
+                        let recovered_memtable = MemTable::recover_from_wal(sst_id, wal_path)?;
+                        let old_memtable =
+                            std::mem::replace(&mut state.memtable, Arc::new(recovered_memtable));
+                        if !old_memtable.is_empty() {
+                            state.imm_memtables.insert(0, old_memtable);
+                        }
+                    }
                 }
             }
         }
@@ -364,12 +376,31 @@ impl LsmStorageInner {
             });
         });
 
+        // next_sst_id += 1;
+        // wrong, because this was never created
+
+        // originally wrong -- without the id check, it would have double created the memtable
+        if options.enable_wal && state.memtable.id() == 0 {
+            let next_wal_path = path.join(format!("{next_sst_id}.wal"));
+            if next_wal_path.exists() {
+                let recovered_memtable = MemTable::recover_from_wal(next_sst_id, next_wal_path)?;
+                let _ = std::mem::replace(&mut state.memtable, Arc::new(recovered_memtable));
+            } else {
+                let _ = std::mem::replace(
+                    &mut state.memtable,
+                    Arc::new(MemTable::create_with_wal(next_sst_id, next_wal_path)?),
+                );
+            }
+        }
+
+        next_sst_id += 1;
+
         let storage = Self {
             state: Arc::new(RwLock::new(Arc::new(state))),
             state_lock: Mutex::new(()),
             path: path.to_path_buf(),
             block_cache: Arc::new(BlockCache::new(1024)),
-            next_sst_id: AtomicUsize::new(next_sst_id + 1),
+            next_sst_id: AtomicUsize::new(next_sst_id),
             compaction_controller,
             manifest: Some(manifest),
             options: options.into(),
@@ -381,7 +412,7 @@ impl LsmStorageInner {
     }
 
     pub fn sync(&self) -> Result<()> {
-        unimplemented!()
+        self.state.read().memtable.sync_wal()
     }
 
     pub fn add_compaction_filter(&self, compaction_filter: CompactionFilter) {
@@ -528,7 +559,21 @@ impl LsmStorageInner {
         let mut new_state = self.state.read().as_ref().clone();
         let full_memtable = new_state.memtable.clone();
         new_state.imm_memtables.insert(0, full_memtable);
-        new_state.memtable = Arc::new(MemTable::create(self.next_sst_id()));
+        let next_sst_id = self.next_sst_id();
+        if self.options.enable_wal {
+            new_state.memtable = Arc::new(MemTable::create_with_wal(
+                next_sst_id,
+                self.path.join(format!("{next_sst_id}.wal")),
+            )?);
+            self.manifest.as_ref().map(|manifest| {
+                manifest.add_record(
+                    _state_lock_observer,
+                    ManifestRecord::NewMemtable(next_sst_id),
+                )
+            });
+        } else {
+            new_state.memtable = Arc::new(MemTable::create(next_sst_id));
+        }
         let mut write_lock = self.state.write();
         let _ = std::mem::replace(write_lock.deref_mut(), Arc::new(new_state));
         Ok(())
@@ -571,8 +616,10 @@ impl LsmStorageInner {
                 let mut write_lock = self.state.write();
                 let _ = std::mem::replace(write_lock.deref_mut(), Arc::new(new_state));
             }
+            if self.options.enable_wal {
+                std::fs::remove_file(self.path.join(format!("{next_sst_id}.wal")))?;
+            }
         }
-
         Ok(())
     }
 
