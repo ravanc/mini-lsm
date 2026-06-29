@@ -200,10 +200,6 @@ impl SsTable {
             self.block_meta_offset - block_offset
         } else {
             // subtract next block's offset from this block's offset
-            println!(
-                "NEXT BLOCK OFFSET {}, BLOCK_OFFSET {block_offset}",
-                self.block_meta[block_idx + 1].offset
-            );
             self.block_meta[block_idx + 1].offset - block_offset
         };
         let block_data = FileObject::read(&self.file, block_offset as u64, block_len as u64)?;

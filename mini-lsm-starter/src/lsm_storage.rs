@@ -310,8 +310,6 @@ impl LsmStorageInner {
 
         let (_, manifest_records) = Manifest::recover(path.join("MANIFEST"))?;
 
-        println!("MANIFEST RECORDS LEN {}", manifest_records.len());
-
         for manifest_record in manifest_records {
             match manifest_record {
                 ManifestRecord::Flush(sst_id) => {
@@ -365,8 +363,6 @@ impl LsmStorageInner {
                     .cmp(state.sstables[b].first_key())
             });
         });
-
-        println!("NEW SST ID {next_sst_id}");
 
         let storage = Self {
             state: Arc::new(RwLock::new(Arc::new(state))),
