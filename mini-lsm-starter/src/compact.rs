@@ -245,16 +245,18 @@ impl LsmStorageInner {
             .copied()
             .chain(original_l1.iter().copied())
             .collect::<Vec<_>>();
-        let compacted_ssts = self.compact(&CompactionTask::ForceFullCompaction {
+        let task = CompactionTask::ForceFullCompaction {
             l0_sstables: original_l0.clone(),
             l1_sstables: original_l1,
-        })?;
+        };
+        let compacted_ssts = self.compact(&task)?;
         drop(state);
 
         let l1_sst_ids = compacted_ssts
             .iter()
             .map(|sst| sst.sst_id())
             .collect::<Vec<_>>();
+        let state_lock_observer = self.state_lock.lock();
         let mut write_lock = self.state.write();
         let mut state_clone = write_lock.as_ref().clone();
 
@@ -270,7 +272,7 @@ impl LsmStorageInner {
         }
 
         state_clone.l0_sstables = new_l0;
-        state_clone.levels[0] = (1, l1_sst_ids);
+        state_clone.levels[0] = (1, l1_sst_ids.clone());
         state_clone.sstables = new_sstables;
 
         // apparently std::mem::replace does not work here?
@@ -279,12 +281,21 @@ impl LsmStorageInner {
         // my original implementation was wrong because i used new_state cloned
         // at the start, which does not take into account changes in memtable
         // found this issue by asking claude the follow on question
+        if let Some(manifest) = &self.manifest {
+            manifest.add_record(
+                &state_lock_observer,
+                crate::manifest::ManifestRecord::Compaction(task, l1_sst_ids),
+            )?;
+        }
 
         drop(write_lock);
+        drop(state_lock_observer);
 
         for removed_sst_id in combined_sst_ids {
             std::fs::remove_file(self.path_of_sst(removed_sst_id))?; // need this, if not the files will start bloating
         }
+
+        self.sync_dir()?;
 
         Ok(())
     }
@@ -341,12 +352,21 @@ impl LsmStorageInner {
             // }
             *write_lock = Arc::new(new_state);
 
+            if let Some(manifest) = &self.manifest {
+                manifest.add_record(
+                    &state_lock,
+                    crate::manifest::ManifestRecord::Compaction(task, sst_ids),
+                )?;
+            }
+
             drop(write_lock);
             drop(state_lock);
 
             for removed_sst_id in to_delete {
                 std::fs::remove_file(self.path_of_sst(removed_sst_id))?;
             }
+
+            self.sync_dir()?;
         }
         Ok(())
     }

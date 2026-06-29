@@ -58,7 +58,7 @@ impl BlockMeta {
             let last_key = meta.last_key.clone().into_inner();
             let first_key_len = first_key.len() as u16;
             let last_key_len = last_key.len() as u16;
-            buf.put_u16(meta.offset as u16);
+            buf.put_u32(meta.offset as u32);
             buf.put_u16(first_key_len);
             buf.put(first_key);
             buf.put_u16(last_key_len);
@@ -70,7 +70,7 @@ impl BlockMeta {
     pub fn decode_block_meta(mut buf: impl Buf) -> Vec<BlockMeta> {
         let mut meta = vec![];
         while buf.has_remaining() {
-            let offset = buf.get_u16() as usize;
+            let offset = buf.get_u32() as usize;
             let first_key_len = buf.get_u16() as usize;
             let first_key = KeyBytes::from_bytes(buf.copy_to_bytes(first_key_len));
             let last_key_len = buf.get_u16() as usize;
@@ -200,6 +200,10 @@ impl SsTable {
             self.block_meta_offset - block_offset
         } else {
             // subtract next block's offset from this block's offset
+            println!(
+                "NEXT BLOCK OFFSET {}, BLOCK_OFFSET {block_offset}",
+                self.block_meta[block_idx + 1].offset
+            );
             self.block_meta[block_idx + 1].offset - block_offset
         };
         let block_data = FileObject::read(&self.file, block_offset as u64, block_len as u64)?;

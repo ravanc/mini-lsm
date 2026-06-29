@@ -61,8 +61,8 @@ impl LeveledCompactionController {
         );
 
         let level = &_snapshot.levels[_in_level].1;
-        let start = level.partition_point(|id| _snapshot.sstables[id].last_key() < &first_key);
-        let end = level.partition_point(|id| _snapshot.sstables[id].first_key() <= &last_key);
+        let start = level.partition_point(|id| _snapshot.sstables[id].last_key() < first_key);
+        let end = level.partition_point(|id| _snapshot.sstables[id].first_key() <= last_key);
         level[start..end].to_vec()
     }
 
@@ -78,8 +78,9 @@ impl LeveledCompactionController {
         if last_level_size_b > self.options.base_level_size_mb * 1024 * 1024 {
             let mut cur_size = last_level_size_b;
             target_sizes.reverse();
-            for i in 0..target_sizes.len() {
-                target_sizes[i] = cur_size;
+            // more idiomatic rust
+            for slot in &mut target_sizes {
+                *slot = cur_size;
                 cur_size /= self.options.level_size_multiplier;
                 if cur_size == 0 {
                     break;
@@ -95,7 +96,7 @@ impl LeveledCompactionController {
                 .position(|size| *size > 0)
                 .unwrap_or(target_sizes.len() - 1);
             let overlapping_ssts =
-                self.find_overlapping_ssts(&_snapshot, &_snapshot.l0_sstables, flush_target);
+                self.find_overlapping_ssts(_snapshot, &_snapshot.l0_sstables, flush_target);
             return Some(LeveledCompactionTask {
                 upper_level: None,
                 upper_level_sst_ids: _snapshot.l0_sstables.clone(),
@@ -124,9 +125,9 @@ impl LeveledCompactionController {
         if *max_ratio > 10 {
             let to_compact = ratios.iter().position(|ratio| ratio == max_ratio)?;
             let sst_ids: &Vec<usize> = &_snapshot.levels[to_compact].1;
-            let min_sst_id = sst_ids.iter().min().unwrap_or(&sst_ids[0]).clone();
+            let min_sst_id = *sst_ids.iter().min().unwrap_or(&sst_ids[0]);
             let overlapping_ssts =
-                self.find_overlapping_ssts(&_snapshot, &[min_sst_id], to_compact + 1);
+                self.find_overlapping_ssts(_snapshot, &[min_sst_id], to_compact + 1);
             return Some(LeveledCompactionTask {
                 upper_level: Some(to_compact),
                 upper_level_sst_ids: vec![min_sst_id],
@@ -162,10 +163,14 @@ impl LeveledCompactionController {
         //         .splice(insert_position..insert_position, _output.to_vec());
         // }
 
-        let first_key = _snapshot.sstables[&_output[0]].first_key();
-        let insert_position = _snapshot.levels[_task.lower_level]
-            .1
-            .partition_point(|id| _snapshot.sstables[id].last_key() < &first_key);
+        let mut insert_position = 0;
+
+        if !_in_recovery {
+            let first_key = _snapshot.sstables[&_output[0]].first_key();
+            insert_position = _snapshot.levels[_task.lower_level]
+                .1
+                .partition_point(|id| _snapshot.sstables[id].last_key() < first_key);
+        }
         new_state.levels[_task.lower_level]
             .1
             .splice(insert_position..insert_position, _output.to_vec());
