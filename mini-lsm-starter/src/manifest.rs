@@ -20,7 +20,8 @@ use std::path::Path;
 use std::sync::Arc;
 use std::{fs::File, io::Seek};
 
-use anyhow::Result;
+use anyhow::{Result, bail};
+use bytes::{Buf, Bytes};
 use parking_lot::{Mutex, MutexGuard};
 use serde::{Deserialize, Serialize};
 
@@ -51,10 +52,25 @@ impl Manifest {
 
     pub fn recover(_path: impl AsRef<Path>) -> Result<(Self, Vec<ManifestRecord>)> {
         let file = std::fs::File::open(&_path)?;
-        let buf = std::fs::read(_path)?;
-        let manifest_records = serde_json::Deserializer::from_slice(&buf)
-            .into_iter::<ManifestRecord>()
-            .collect::<Result<Vec<ManifestRecord>, _>>()?;
+        let mut buf = Bytes::from(std::fs::read(_path)?);
+        let mut manifest_records = vec![];
+
+        while buf.has_remaining() {
+            let record_len = buf.get_u32();
+            let encoded_record = buf.copy_to_bytes(record_len as usize);
+            let checksum = buf.get_u32();
+            let computed_checksum = crc32fast::hash(&encoded_record);
+
+            if checksum != computed_checksum {
+                bail!("manifest checksum err");
+            }
+            let record: ManifestRecord = serde_json::from_slice(&encoded_record)?;
+            manifest_records.push(record);
+        }
+
+        // let manifest_records = serde_json::Deserializer::from_slice(&buf)
+        //     .into_iter::<ManifestRecord>()
+        //     .collect::<Result<Vec<ManifestRecord>, _>>()?;
         Ok((
             Manifest {
                 file: Arc::new(Mutex::new(file)),
@@ -73,9 +89,17 @@ impl Manifest {
 
     pub fn add_record_when_init(&self, _record: ManifestRecord) -> Result<()> {
         let encoded_record = serde_json::to_vec(&_record)?;
+        let record_len = encoded_record.len() as u32;
+        let checksum = crc32fast::hash(&encoded_record);
+
+        let mut combined_record = vec![];
+        combined_record.extend_from_slice(&record_len.to_be_bytes());
+        combined_record.extend_from_slice(&encoded_record);
+        combined_record.extend_from_slice(&checksum.to_be_bytes());
+
         let mut file_guard = self.file.lock();
         file_guard.seek(std::io::SeekFrom::End(0))?;
-        file_guard.write_all(encoded_record.as_slice())?;
+        file_guard.write_all(combined_record.as_slice())?;
         file_guard.sync_all()?;
         Ok(())
     }

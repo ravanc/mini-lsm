@@ -498,37 +498,69 @@ impl LsmStorageInner {
 
     /// Write a batch of data into the storage. Implement in week 2 day 7.
     pub fn write_batch<T: AsRef<[u8]>>(&self, _batch: &[WriteBatchRecord<T>]) -> Result<()> {
-        unimplemented!()
+        _batch.iter().for_each(|record| match record {
+            WriteBatchRecord::Put(_key, _value) => {
+                let state_clone = self.state.read().clone();
+
+                let _ = state_clone.memtable.put(_key.as_ref(), _value.as_ref());
+
+                if state_clone.memtable.approximate_size() >= self.options.target_sst_size {
+                    let state_lock = self.state_lock.lock();
+                    if self.state.read().memtable.approximate_size() >= self.options.target_sst_size
+                    {
+                        let _ = self.force_freeze_memtable(&state_lock);
+                    }
+                }
+            }
+            WriteBatchRecord::Del(_key) => {
+                let state_clone = self.state.read().clone();
+
+                let _ = state_clone.memtable.put(_key.as_ref(), b"");
+
+                if state_clone.memtable.approximate_size() >= self.options.target_sst_size {
+                    let state_lock = self.state_lock.lock();
+                    if self.state.read().memtable.approximate_size() >= self.options.target_sst_size
+                    {
+                        let _ = self.force_freeze_memtable(&state_lock);
+                    }
+                }
+            }
+        });
+        Ok(())
     }
 
     /// Put a key-value pair into the storage by writing into the current memtable.
     pub fn put(&self, _key: &[u8], _value: &[u8]) -> Result<()> {
-        let state_clone = self.state.read().clone();
+        // let state_clone = self.state.read().clone();
 
-        let _ = state_clone.memtable.put(_key, _value);
+        // let _ = state_clone.memtable.put(_key, _value);
 
-        if state_clone.memtable.approximate_size() >= self.options.target_sst_size {
-            let state_lock = self.state_lock.lock();
-            if self.state.read().memtable.approximate_size() >= self.options.target_sst_size {
-                let _ = self.force_freeze_memtable(&state_lock);
-            }
-        }
+        // if state_clone.memtable.approximate_size() >= self.options.target_sst_size {
+        //     let state_lock = self.state_lock.lock();
+        //     if self.state.read().memtable.approximate_size() >= self.options.target_sst_size {
+        //         let _ = self.force_freeze_memtable(&state_lock);
+        //     }
+        // }
+
+        self.write_batch(&[WriteBatchRecord::Put(_key, _value)])?;
 
         Ok(())
     }
 
     /// Remove a key from the storage by writing an empty value.
     pub fn delete(&self, _key: &[u8]) -> Result<()> {
-        let state_clone = self.state.read().clone();
+        // let state_clone = self.state.read().clone();
 
-        let _ = state_clone.memtable.put(_key, b"");
+        // let _ = state_clone.memtable.put(_key, b"");
 
-        if state_clone.memtable.approximate_size() >= self.options.target_sst_size {
-            let state_lock = self.state_lock.lock();
-            if self.state.read().memtable.approximate_size() >= self.options.target_sst_size {
-                let _ = self.force_freeze_memtable(&state_lock);
-            }
-        }
+        // if state_clone.memtable.approximate_size() >= self.options.target_sst_size {
+        //     let state_lock = self.state_lock.lock();
+        //     if self.state.read().memtable.approximate_size() >= self.options.target_sst_size {
+        //         let _ = self.force_freeze_memtable(&state_lock);
+        //     }
+        // }
+
+        self.write_batch(&[WriteBatchRecord::Del(_key)])?;
 
         Ok(())
     }

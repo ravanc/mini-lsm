@@ -16,6 +16,7 @@
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
 use anyhow::Result;
+use anyhow::bail;
 use bytes::Buf;
 use bytes::Bytes;
 use crossbeam_skiplist::SkipMap;
@@ -50,20 +51,36 @@ impl Wal {
             .truncate(true)
             .open(_path)?;
         Ok(Wal {
-        file: Arc::new(Mutex::new(BufWriter::new(file))),
-    })
+            file: Arc::new(Mutex::new(BufWriter::new(file))),
+        })
     }
 
     pub fn recover(_path: impl AsRef<Path>, _skiplist: &SkipMap<Bytes, Bytes>) -> Result<Self> {
         // important, otherwise multi-sessions wouldnt work
-        let file = std::fs::File::options().read(true).append(true).open(&_path)?;
+        let file = std::fs::File::options()
+            .read(true)
+            .append(true)
+            .open(&_path)?;
         let binding = std::fs::read(_path)?;
         let mut wal = binding.as_slice();
         while wal.has_remaining() {
-            let key_len = wal.get_u16() as usize;
-            let key = wal.copy_to_bytes(key_len);
-            let value_len = wal.get_u16() as usize;
-            let value = wal.copy_to_bytes(value_len);
+            let key_len = wal.get_u16();
+            let key = wal.copy_to_bytes(key_len as usize);
+            let value_len = wal.get_u16();
+            let value = wal.copy_to_bytes(value_len as usize);
+            let checksum = wal.get_u32();
+
+            let mut entry = vec![];
+            entry.extend_from_slice(&key_len.to_be_bytes());
+            entry.extend_from_slice(&key);
+            entry.extend_from_slice(&value_len.to_be_bytes());
+            entry.extend_from_slice(&value);
+            let computed_checksum = crc32fast::hash(&entry);
+
+            if checksum != computed_checksum {
+                bail!("wal checksum err");
+            }
+
             _skiplist.insert(key, value);
         }
         Ok(Wal {
@@ -75,10 +92,14 @@ impl Wal {
         let mut lock = self.file.lock();
         let key_len = (_key.len() as u16).to_be_bytes();
         let value_len = (_value.len() as u16).to_be_bytes();
-        lock.write_all(&key_len)?;
-        lock.write_all(_key)?;
-        lock.write_all(&value_len)?;
-        lock.write_all(_value)?;
+        let entry = [&key_len, _key, &value_len, _value].concat();
+        let checksum = crc32fast::hash(&entry);
+        lock.write_all(&entry)?;
+        lock.write_all(&checksum.to_be_bytes())?;
+        // lock.write_all(&key_len)?;
+        // lock.write_all(_key)?;
+        // lock.write_all(&value_len)?;
+        // lock.write_all(_value)?;
         Ok(())
     }
 

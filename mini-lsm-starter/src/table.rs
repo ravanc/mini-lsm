@@ -23,7 +23,7 @@ use std::fs::File;
 use std::path::Path;
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 pub use builder::SsTableBuilder;
 use bytes::{Buf, BufMut};
 pub use iterator::SsTableIterator;
@@ -48,11 +48,9 @@ impl BlockMeta {
     /// Encode block meta to a buffer.
     /// You may add extra fields to the buffer,
     /// in order to help keep track of `first_key` when decoding from the same buffer in the future.
-    pub fn encode_block_meta(
-        block_meta: &[BlockMeta],
-        // #[allow(clippy::ptr_arg)] // remove this allow after you finish
-        buf: &mut Vec<u8>,
-    ) {
+    pub fn encode_block_meta(block_meta: &[BlockMeta], buf: &mut Vec<u8>) {
+        // let num_block_meta = block_meta.len() as u32;
+        // buf.put_u32(num_block_meta);
         for meta in block_meta {
             let first_key = meta.first_key.clone().into_inner();
             let last_key = meta.last_key.clone().into_inner();
@@ -68,7 +66,9 @@ impl BlockMeta {
 
     /// Decode block meta from a buffer.
     pub fn decode_block_meta(mut buf: impl Buf) -> Vec<BlockMeta> {
+        // let num_block_meta = buf.get_u32();
         let mut meta = vec![];
+        // for _ in 0..num_block_meta {
         while buf.has_remaining() {
             let offset = buf.get_u32() as usize;
             let first_key_len = buf.get_u16() as usize;
@@ -151,10 +151,21 @@ impl SsTable {
         let bloom = Bloom::decode(&bloom_bytes)?;
         let block_meta_offset =
             u32::from_be_bytes(file.read(bloom_offset as u64 - 4, 4)?.try_into().unwrap());
+
+        let meta_checksum =
+            u32::from_be_bytes(file.read(bloom_offset as u64 - 8, 4)?.try_into().unwrap());
+
         let block_meta_bytes = file.read(
             block_meta_offset as u64,
-            bloom_offset as u64 - 4 - block_meta_offset as u64,
+            bloom_offset as u64 - 8 - block_meta_offset as u64, // minus 8 because we have a new u32 checksum
         )?;
+
+        let computed_checksum = crc32fast::hash(&block_meta_bytes);
+
+        if meta_checksum != computed_checksum {
+            bail!("meta checksum err")
+        }
+
         let block_meta = BlockMeta::decode_block_meta(&block_meta_bytes[..]);
         let first_key = block_meta[0].first_key.clone();
         let last_key = block_meta[block_meta.len() - 1].last_key.clone();
@@ -202,7 +213,21 @@ impl SsTable {
             // subtract next block's offset from this block's offset
             self.block_meta[block_idx + 1].offset - block_offset
         };
-        let block_data = FileObject::read(&self.file, block_offset as u64, block_len as u64)?;
+        let block_data_with_checksum =
+            FileObject::read(&self.file, block_offset as u64, block_len as u64)?;
+        let checksum_bytes: [u8; 4] = block_data_with_checksum
+            [block_data_with_checksum.len() - 4..]
+            .try_into()
+            .unwrap();
+        let checksum = u32::from_be_bytes(checksum_bytes);
+
+        let block_data = block_data_with_checksum[..block_data_with_checksum.len() - 4].to_vec();
+        let computed_checksum = crc32fast::hash(&block_data);
+
+        if checksum != computed_checksum {
+            bail!("block data checksum err")
+        }
+
         Ok(Arc::new(Block::decode(&block_data)))
     }
 

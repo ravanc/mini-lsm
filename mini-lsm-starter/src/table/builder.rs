@@ -72,7 +72,11 @@ impl SsTableBuilder {
             let old_block = old_block_builder.build();
 
             let block_offset = self.data.len();
-            self.data.put(old_block.encode());
+            let encoded_block: Bytes = old_block.encode();
+            self.data.put(encoded_block.clone());
+
+            let checksum = crc32fast::hash(&encoded_block);
+            self.data.put_u32(checksum);
 
             // entry 0 is uncompressed: overlap(=0)(u16) | rest_len(u16) | key
             let first_key_len = u16::from_be_bytes([old_block.data[2], old_block.data[3]]) as usize;
@@ -139,7 +143,11 @@ impl SsTableBuilder {
             let old_block = self.builder.build();
             let block_offset: usize = self.data.len();
 
-            self.data.put(old_block.encode());
+            let encoded_block: Bytes = old_block.encode();
+            self.data.put(encoded_block.clone());
+
+            let checksum = crc32fast::hash(&encoded_block);
+            self.data.put_u32(checksum);
 
             let first_key_len = u16::from_be_bytes([old_block.data[2], old_block.data[3]]) as usize;
             let first_key_bytes =
@@ -175,6 +183,10 @@ impl SsTableBuilder {
 
         let mut metadata_buf = vec![];
         BlockMeta::encode_block_meta(&self.meta, &mut metadata_buf);
+
+        let metadata_checksum = crc32fast::hash(&metadata_buf);
+        metadata_buf.put_u32(metadata_checksum);
+
         let mut data = self.data.clone();
         data.extend_from_slice(&metadata_buf);
         let block_meta_offset = self.data.len();
