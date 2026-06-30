@@ -21,7 +21,7 @@ use anyhow::Result;
 use super::{BlockMeta, SsTable};
 use crate::{
     block::BlockBuilder,
-    key::{KeyBytes, KeySlice},
+    key::{KeyBytes, KeySlice, TS_DEFAULT},
     lsm_storage::BlockCache,
     table::{FileObject, bloom::Bloom},
 };
@@ -78,11 +78,15 @@ impl SsTableBuilder {
             let checksum = crc32fast::hash(&encoded_block);
             self.data.put_u32(checksum);
 
-            // entry 0 is uncompressed: overlap(=0)(u16) | rest_len(u16) | key
             let first_key_len = u16::from_be_bytes([old_block.data[2], old_block.data[3]]) as usize;
             let first_key_bytes =
                 bytes::Bytes::copy_from_slice(&old_block.data[4..first_key_len + 4]);
-            let first_key = KeyBytes::from_bytes(first_key_bytes.clone());
+            let first_key_ts = u64::from_be_bytes(
+                old_block.data[4 + first_key_len..4 + first_key_len + 8]
+                    .try_into()
+                    .unwrap(),
+            );
+            let first_key = KeyBytes::from_bytes_with_ts(first_key_bytes.clone(), first_key_ts);
 
             let last_key_offset = old_block.offsets[old_block.offsets.len() - 1] as usize;
             let last_key_overlap_len = u16::from_be_bytes([
@@ -97,12 +101,20 @@ impl SsTableBuilder {
                 &old_block.data[last_key_offset + 4..last_key_offset + last_key_rest_len + 4];
             let overlap = &first_key_bytes[..last_key_overlap_len];
             let last_key_bytes = [overlap, last_key_rest].concat();
-            let last_key = KeyBytes::from_bytes(Bytes::from(last_key_bytes));
+            let last_key_ts = u64::from_be_bytes(
+                old_block.data[last_key_offset + 4 + last_key_rest_len
+                    ..last_key_offset + 4 + last_key_rest_len + 8]
+                    .try_into()
+                    .unwrap(),
+            );
+            let last_key = KeyBytes::from_bytes_with_ts(Bytes::from(last_key_bytes), last_key_ts);
 
             let old_block_meta = BlockMeta {
                 offset: block_offset,
                 first_key,
+                first_key_ts,
                 last_key,
+                last_key_ts,
             };
 
             self.meta.push(old_block_meta);
@@ -116,7 +128,7 @@ impl SsTableBuilder {
 
         self.last_key = key.to_key_vec().into_inner();
 
-        self.key_hashes.push(farmhash::fingerprint32(key.raw_ref()));
+        self.key_hashes.push(farmhash::fingerprint32(key.key_ref()));
     }
 
     /// Get the estimated size of the SSTable.
@@ -152,7 +164,12 @@ impl SsTableBuilder {
             let first_key_len = u16::from_be_bytes([old_block.data[2], old_block.data[3]]) as usize;
             let first_key_bytes =
                 bytes::Bytes::copy_from_slice(&old_block.data[4..first_key_len + 4]);
-            let first_key = KeyBytes::from_bytes(first_key_bytes.clone());
+            let first_key_ts = u64::from_be_bytes(
+                old_block.data[4 + first_key_len..4 + first_key_len + 8]
+                    .try_into()
+                    .unwrap(),
+            );
+            let first_key = KeyBytes::from_bytes_with_ts(first_key_bytes.clone(), first_key_ts);
 
             let last_key_offset = old_block.offsets[old_block.offsets.len() - 1] as usize;
             let last_key_overlap_len = u16::from_be_bytes([
@@ -167,12 +184,20 @@ impl SsTableBuilder {
                 &old_block.data[last_key_offset + 4..last_key_offset + last_key_rest_len + 4];
             let overlap = &first_key_bytes[..last_key_overlap_len];
             let last_key_bytes = [overlap, last_key_rest].concat();
-            let last_key = KeyBytes::from_bytes(Bytes::from(last_key_bytes));
+            let last_key_ts = u64::from_be_bytes(
+                old_block.data[last_key_offset + 4 + last_key_rest_len
+                    ..last_key_offset + 4 + last_key_rest_len + 8]
+                    .try_into()
+                    .unwrap(),
+            );
+            let last_key = KeyBytes::from_bytes_with_ts(Bytes::from(last_key_bytes), last_key_ts);
 
             let old_block_meta = BlockMeta {
                 offset: block_offset,
                 first_key,
+                first_key_ts,
                 last_key,
+                last_key_ts,
             };
 
             self.meta.push(old_block_meta);
@@ -196,14 +221,23 @@ impl SsTableBuilder {
         Bloom::encode(&bloom, &mut data);
         data.extend_from_slice(&(bloom_offset as u32).to_be_bytes());
 
+        let first_key_ts = self.meta[0].first_key_ts;
+        let last_key_ts = self
+            .meta
+            .last()
+            .map_or(TS_DEFAULT, |block_meta| block_meta.last_key_ts);
+
         Ok(SsTable {
             file: FileObject::create(path.as_ref(), data)?,
             block_meta: self.meta,
             block_meta_offset,
             id,
             block_cache,
-            first_key: KeyBytes::from_bytes(bytes::Bytes::from(self.first_key)),
-            last_key: KeyBytes::from_bytes(bytes::Bytes::from(self.last_key)),
+            first_key: KeyBytes::from_bytes_with_ts(
+                bytes::Bytes::from(self.first_key),
+                first_key_ts,
+            ),
+            last_key: KeyBytes::from_bytes_with_ts(bytes::Bytes::from(self.last_key), last_key_ts),
             bloom: Some(bloom),
             max_ts: 0,
         })

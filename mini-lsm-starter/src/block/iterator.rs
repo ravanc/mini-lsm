@@ -17,7 +17,7 @@
 
 use std::sync::Arc;
 
-use crate::key::{KeySlice, KeyVec};
+use crate::key::{KeySlice, KeyVec, TS_DEFAULT};
 
 use super::Block;
 
@@ -51,17 +51,19 @@ impl BlockIterator {
         let key_overlap_len = self.get_key_overlap_len_at(position) as usize;
         let rest_key_len = self.get_rest_key_len_at(position) as usize;
         let rest_key = &self.block.data[offset + 4..offset + rest_key_len + 4];
-        let overlap_key = &self.first_key.raw_ref()[..key_overlap_len];
+        let overlap_key = &self.first_key.key_ref()[..key_overlap_len];
         let key = [overlap_key, rest_key].concat();
-        KeyVec::from_vec(key)
+        let ts = TS_DEFAULT;
+        KeyVec::from_vec_with_ts(key, ts)
     }
 
     fn get_value_len_at(&self, position: u16) -> u16 {
         let offset = self.block.offsets[position as usize] as usize;
         let key_len = self.get_rest_key_len_at(position) as usize;
         u16::from_be_bytes([
-            self.block.data[offset + 4 + key_len],
-            self.block.data[offset + 5 + key_len],
+            // have to add 8 for extra timestamp
+            self.block.data[offset + 4 + 8 + key_len],
+            self.block.data[offset + 5 + 8 + key_len],
         ])
     }
 
@@ -70,14 +72,16 @@ impl BlockIterator {
         let key_len = self.get_rest_key_len_at(position) as usize;
         let value_len = self.get_value_len_at(position) as usize;
         (
-            offset + 4 + key_len + 2,
-            offset + 4 + key_len + 2 + value_len,
+            // have to add 8 for extra timestamp
+            offset + 4 + 8 + key_len + 2,
+            offset + 4 + 8 + key_len + 2 + value_len,
         )
     }
 
     fn new(block: Arc<Block>) -> Self {
         let rest_key_len = u16::from_be_bytes([block.data[2], block.data[3]]) as usize;
-        let first_key = KeyVec::from_vec(block.data[4..4 + rest_key_len].to_vec());
+        let ts = TS_DEFAULT;
+        let first_key = KeyVec::from_vec_with_ts(block.data[4..4 + rest_key_len].to_vec(), ts);
 
         Self {
             block,

@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
-#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
-
 pub(crate) mod bloom;
 mod builder;
 mod iterator;
@@ -40,8 +37,10 @@ pub struct BlockMeta {
     pub offset: usize,
     /// The first key of the data block.
     pub first_key: KeyBytes,
+    pub first_key_ts: u64,
     /// The last key of the data block.
     pub last_key: KeyBytes,
+    pub last_key_ts: u64,
 }
 
 impl BlockMeta {
@@ -52,14 +51,18 @@ impl BlockMeta {
         // let num_block_meta = block_meta.len() as u32;
         // buf.put_u32(num_block_meta);
         for meta in block_meta {
-            let first_key = meta.first_key.clone().into_inner();
-            let last_key = meta.last_key.clone().into_inner();
+            let first_key = meta.first_key.key_ref();
             let first_key_len = first_key.len() as u16;
+            let first_key_ts = meta.first_key_ts;
+            let last_key = meta.last_key.key_ref();
             let last_key_len = last_key.len() as u16;
+            let last_key_ts = meta.last_key_ts;
             buf.put_u32(meta.offset as u32);
             buf.put_u16(first_key_len);
+            buf.put_u64(first_key_ts);
             buf.put(first_key);
             buf.put_u16(last_key_len);
+            buf.put_u64(last_key_ts);
             buf.put(last_key);
         }
     }
@@ -72,13 +75,19 @@ impl BlockMeta {
         while buf.has_remaining() {
             let offset = buf.get_u32() as usize;
             let first_key_len = buf.get_u16() as usize;
-            let first_key = KeyBytes::from_bytes(buf.copy_to_bytes(first_key_len));
+            let first_key_ts = buf.get_u64();
+            let first_key =
+                KeyBytes::from_bytes_with_ts(buf.copy_to_bytes(first_key_len), first_key_ts);
             let last_key_len = buf.get_u16() as usize;
-            let last_key = KeyBytes::from_bytes(buf.copy_to_bytes(last_key_len));
+            let last_key_ts = buf.get_u64();
+            let last_key =
+                KeyBytes::from_bytes_with_ts(buf.copy_to_bytes(last_key_len), last_key_ts);
             meta.push(BlockMeta {
                 offset,
                 first_key,
+                first_key_ts,
                 last_key,
+                last_key_ts,
             })
         }
         meta

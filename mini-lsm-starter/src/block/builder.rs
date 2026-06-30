@@ -14,7 +14,7 @@
 
 use bytes::BufMut;
 
-use crate::key::{KeySlice, KeyVec};
+use crate::key::{KeySlice, KeyVec, TS_DEFAULT};
 
 use super::Block;
 
@@ -47,10 +47,11 @@ impl BlockBuilder {
     pub fn add(&mut self, key: KeySlice, value: &[u8]) -> bool {
         let offset = self.data.len();
         let offset_len = (self.offsets.len() + 1) * 2;
-        let key_len = key.len();
+        let key_len = key.key_len();
         let value_len = value.len();
         let num_elements_size = 2;
-        let after_len = offset + offset_len + key_len + value_len + num_elements_size;
+        let after_len =
+            offset + offset_len + key_len + 8 /* timestamp size */ + value_len + num_elements_size;
         if after_len > self.block_size && !self.first_key.is_empty() {
             return false;
         }
@@ -59,28 +60,30 @@ impl BlockBuilder {
             self.first_key.set_from_slice(key);
             self.data.put_u16(0); // overlap_len
             self.data.put_u16(key_len as u16); // rest_key_len
-            self.data.put(key.into_inner());
+            self.data.put(key.key_ref());
+            self.data.put_u64(TS_DEFAULT);
             self.data.put_u16(value_len as u16);
             self.data.put(value);
         }
         /*
         pre-compression optimisation
         self.data.put_u16(key_len as u16);
-        self.data.put(key.into_inner());
+        self.data.put(key.key_ref());
         self.data.put_u16(value_len as u16);
         self.data.put(value);
         */
         else {
             let key_overlap_len = key
-                .into_inner()
+                .key_ref()
                 .iter()
-                .zip(self.first_key.raw_ref().iter())
+                .zip(self.first_key.key_ref().iter())
                 .take_while(|(a, b)| a == b)
                 .count();
             self.data.put_u16(key_overlap_len as u16);
-            let rest_key_len = key.len() - key_overlap_len;
+            let rest_key_len = key.key_len() - key_overlap_len;
             self.data.put_u16(rest_key_len as u16);
-            self.data.put(&key.into_inner()[key_overlap_len..]);
+            self.data.put(&key.key_ref()[key_overlap_len..]);
+            self.data.put_u64(TS_DEFAULT);
             self.data.put_u16(value_len as u16);
             self.data.put(value);
         }

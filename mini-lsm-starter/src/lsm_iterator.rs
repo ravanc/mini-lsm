@@ -58,7 +58,7 @@ impl StorageIterator for LsmIterator {
             return false;
         }
 
-        let key = self.inner.key().into_inner();
+        let key = self.inner.key().key_ref();
 
         match &self.end_bound {
             Bound::Unbounded => true,
@@ -68,7 +68,7 @@ impl StorageIterator for LsmIterator {
     }
 
     fn key(&self) -> &[u8] {
-        let key = self.inner.key().into_inner();
+        let key = self.inner.key().key_ref();
         // let is_over: bool = match &self.end_bound {
         //     Bound::Unbounded => false,
         //     Bound::Included(end) => key > end.as_ref(),

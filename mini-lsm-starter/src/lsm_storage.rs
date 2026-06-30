@@ -35,7 +35,7 @@ use crate::iterators::StorageIterator;
 use crate::iterators::concat_iterator::SstConcatIterator;
 use crate::iterators::merge_iterator::MergeIterator;
 use crate::iterators::two_merge_iterator::TwoMergeIterator;
-use crate::key::{Key, KeySlice};
+use crate::key::{Key, KeySlice, TS_RANGE_BEGIN};
 use crate::lsm_iterator::{FusedIterator, LsmIterator};
 use crate::manifest::{Manifest, ManifestRecord};
 use crate::mem_table::MemTable;
@@ -449,7 +449,8 @@ impl LsmStorageInner {
                     .is_none_or(|bloom| bloom.may_contain(farmhash::fingerprint32(_key)))
             })
             .map(|sst| {
-                SsTableIterator::create_and_seek_to_key(sst, Key::from_slice(_key)).map(Box::new)
+                SsTableIterator::create_and_seek_to_key(sst, Key::from_slice(_key, TS_RANGE_BEGIN))
+                    .map(Box::new)
             })
             .collect::<Result<Vec<_>>>()?;
 
@@ -475,8 +476,11 @@ impl LsmStorageInner {
                     .collect::<Vec<_>>()
             })
             .map(|sst_vec| {
-                SstConcatIterator::create_and_seek_to_key(sst_vec, KeySlice::from_slice(_key))
-                    .map(Box::new)
+                SstConcatIterator::create_and_seek_to_key(
+                    sst_vec,
+                    KeySlice::from_slice(_key, TS_RANGE_BEGIN),
+                )
+                .map(Box::new)
             })
             .collect::<Result<Vec<_>>>()?;
 
@@ -707,7 +711,7 @@ impl LsmStorageInner {
             .map(|sst_id| {
                 SsTableIterator::create_and_seek_to_key(
                     state.sstables[sst_id].clone(),
-                    Key::from_slice(lower_bound_key),
+                    Key::from_slice(lower_bound_key, TS_RANGE_BEGIN),
                 )
                 .map(Box::new)
             })
@@ -747,7 +751,7 @@ impl LsmStorageInner {
             .map(|sst_vec| {
                 SstConcatIterator::create_and_seek_to_key(
                     sst_vec,
-                    KeySlice::from_slice(lower_bound_key),
+                    KeySlice::from_slice(lower_bound_key, TS_RANGE_BEGIN),
                 )
                 .map(Box::new)
             })
